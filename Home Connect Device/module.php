@@ -560,8 +560,9 @@ class HomeConnectDevice extends IPSModule
         return substr($string, strrpos($string, '.') + 1, strlen($string) - strrpos($string, '.'));
     }
 
-    private function requestDataFromParent($endpoint, $payload = '')
+    public function requestDataFromParent($endpoint, $payload = '')
     {
+        $this->SendDebug(__FUNCTION__, sprintf('endpoint: %s, payload: %s', $endpoint, $payload), 0);
         $data = [
             'DataID'      => '{41DDAA3B-65F0-B833-36EE-CEB57A80D022}',
             'Endpoint'    => $endpoint
@@ -586,7 +587,7 @@ class HomeConnectDevice extends IPSModule
                     break;
             }
         }
-        $this->SendDebug('requestetData', $response, 0);
+        $this->SendDebug('responseData', $response, 0);
         return $response;
     }
 
