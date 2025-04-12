@@ -406,10 +406,10 @@ class HomeConnectDevice extends IPSModule
                 ['Value' => 'Start', 'Name' => $this->Translate('Start')],
                 ['Value' => 'Stop', 'Name' => $this->Translate('Stop')]
             ];
-            if (in_array($deviceType, ['Oven', 'CleaningRobot', 'Dryer', 'Washer', 'DryerWasher'])) {
+            if (in_array($deviceType, ['Oven', 'CleaningRobot', 'Dryer', 'Washer', 'WasherDryer'])) {
                 $associations[] = ['Value' => 'Pause', 'Name' => $this->Translate('Pause')];
             }
-            if (in_array($deviceType, ['Oven', 'CleaningRobot', 'Dishwasher', 'Dryer', 'Washer', 'DryerWasher'])) {
+            if (in_array($deviceType, ['Oven', 'CleaningRobot', 'Dishwasher', 'Dryer', 'Washer', 'WasherDryer'])) {
                 $associations[] = ['Value' => 'Resume', 'Name' => $this->Translate('Resume')];
             }
             $this->createAssociations("HomeConnect.Control.$deviceType", $associations);
