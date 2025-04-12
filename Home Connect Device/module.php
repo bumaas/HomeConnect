@@ -320,7 +320,7 @@ class HomeConnectDevice extends IPSModule
 
     private function createPrograms()
     {
-        $rawPrograms = json_decode($this->requestDataFromParent('homeappliances/' . $this->ReadPropertyString('HaID') . '/programs'), true);
+        $rawPrograms = json_decode($this->requestDataFromParent('homeappliances/' . $this->ReadPropertyString('HaID') . '/programs/available'), true);
         if (isset($rawPrograms['error'])) {
             return;
         }
@@ -665,7 +665,7 @@ class HomeConnectDevice extends IPSModule
 
     private function createVariableFromConstraints($profileName, $data, $attribute, $position)
     {
-        $this->SendDebug(__FUNCTION__, sprintf('profileName: %s, data: %s, attribute: %s, position: %s', $profileName, json_encode($data), $attribute, $position), 0);
+        $this->SendDebug(__FUNCTION__, sprintf('profileName: %s, attribute: %s, position: %s, data: %s', $profileName, $attribute, $position, json_encode($data)), 0);
 
         $ident = $this->getLastSnippet($data['key']);
         if ($attribute == 'Option') {
