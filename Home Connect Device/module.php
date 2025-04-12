@@ -325,7 +325,7 @@ class HomeConnectDevice extends IPSModule
             return;
         }
         $programs = $rawPrograms['data']['programs'];
-        $this->SendDebug('Programs', json_encode($programs), 0);
+        $this->SendDebug(__FUNCTION__, json_encode($programs), 0);
         $profileName = 'HomeConnect.' . $this->ReadPropertyString('DeviceType') . '.Programs';
         if (!IPS_VariableProfileExists($profileName)) {
             IPS_CreateVariableProfile($profileName, VARIABLETYPE_STRING);
@@ -479,7 +479,7 @@ class HomeConnectDevice extends IPSModule
         } else {
             $data = $states;
         }
-        $this->SendDebug('States', json_encode($data), 0);
+        $this->SendDebug(__FUNCTION__, json_encode($data), 0);
         if (isset($data['data']['status'])) {
             foreach ($data['data']['status'] as $state) {
                 $ident = $this->getLastSnippet($state['key']);
@@ -601,7 +601,7 @@ class HomeConnectDevice extends IPSModule
     private function setupSettings()
     {
         $allSettings = json_decode($this->requestDataFromParent('homeappliances/' . $this->ReadPropertyString('HaID') . '/settings'), true);
-        $this->SendDebug('Settings', json_encode($allSettings), 0);
+        $this->SendDebug(__FUNCTION__, sprintf('allSettings: %s', json_encode($allSettings)), 0);
         if (isset($allSettings['data']['settings'])) {
             $availableSettings = json_decode($this->ReadAttributeString('Settings'), true);
             $position = 0;
@@ -613,7 +613,7 @@ class HomeConnectDevice extends IPSModule
                 if (!isset($availableSettings[$ident])) {
                     $availableSettings[$ident] = ['key' => $setting['key']];
                 }
-                $this->SendDebug('Setting', json_encode($setting), 0);
+                $this->SendDebug(__FUNCTION__, sprintf('setting: %s', json_encode($setting)), 0);
                 //Create variable accordingly
                 $profileName = str_replace('BSH', 'HomeConnect', $setting['key']);
                 if ($ident == 'PowerState') {
@@ -665,9 +665,8 @@ class HomeConnectDevice extends IPSModule
 
     private function createVariableFromConstraints($profileName, $data, $attribute, $position)
     {
-        $this->SendDebug('UpdatingProfile', $profileName, 0);
+        $this->SendDebug(__FUNCTION__, sprintf('profileName: %s, data: %s, attribute: %s, position: %s', $profileName, json_encode($data), $attribute, $position), 0);
 
-        $this->SendDebug('OptionDetails', json_encode($data), 0);
         $ident = $this->getLastSnippet($data['key']);
         if ($attribute == 'Option') {
             $ident = $attribute . $ident;
