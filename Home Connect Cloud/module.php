@@ -122,31 +122,6 @@ class HomeConnectCloud extends WebOAuthModule
         $this->SendDataToChildren(json_encode($data));
     }
 
-    /**
-     * Detects a 429 rate-limit response carried by the SSE stream and activates
-     * the rate limit. Envelope-agnostic: matches on the raw payload because the
-     * IO wraps the body in different ways. Returns true if a 429 was handled.
-     */
-    private function applyRateLimitFromStream(string $JSONString): bool
-    {
-        if (!preg_match('/"key"\s*:\s*"429"/', $JSONString)) {
-            return false;
-        }
-
-        $retryAfter = preg_match('/remaining period of (\d+) seconds/', $JSONString, $m) ? (int) $m[1] : 60;
-
-        $type = null;
-        if (strpos($JSONString, 'in 1 day') !== false) {
-            $type = 'day';
-        } elseif (strpos($JSONString, 'in 1 minute') !== false) {
-            $type = 'minute';
-        }
-
-        $this->SendDebug('ReceiveRateLimit', sprintf('429 from event stream, blocking for %ds', $retryAfter), 0);
-        $this->applyRateLimit($retryAfter, $type);
-        return true;
-    }
-
     public function MessageSink($Timestamp, $SenderID, $MessageID, $Data)
     {
         $parentID = IPS_GetInstance($this->InstanceID)['ConnectionID'];
@@ -307,6 +282,31 @@ class HomeConnectCloud extends WebOAuthModule
             //Just print raw post data!
             echo file_get_contents('php://input');
         }
+    }
+
+    /**
+     * Detects a 429 rate-limit response carried by the SSE stream and activates
+     * the rate limit. Envelope-agnostic: matches on the raw payload because the
+     * IO wraps the body in different ways. Returns true if a 429 was handled.
+     */
+    private function applyRateLimitFromStream(string $JSONString): bool
+    {
+        if (!preg_match('/"key"\s*:\s*"429"/', $JSONString)) {
+            return false;
+        }
+
+        $retryAfter = preg_match('/remaining period of (\d+) seconds/', $JSONString, $m) ? (int) $m[1] : 60;
+
+        $type = null;
+        if (strpos($JSONString, 'in 1 day') !== false) {
+            $type = 'day';
+        } elseif (strpos($JSONString, 'in 1 minute') !== false) {
+            $type = 'minute';
+        }
+
+        $this->SendDebug('ReceiveRateLimit', sprintf('429 from event stream, blocking for %ds', $retryAfter), 0);
+        $this->applyRateLimit($retryAfter, $type);
+        return true;
     }
 
     private function resetRetries()

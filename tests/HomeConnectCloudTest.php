@@ -29,18 +29,6 @@ class HomeConnectCloudTest extends TestCase
         parent::setUp();
     }
 
-    private function cloud()
-    {
-        return IPS\InstanceManager::getInstanceInterface(IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0]);
-    }
-
-    private function invoke($object, string $method, ...$args)
-    {
-        $ref = new ReflectionMethod($object, $method);
-        $ref->setAccessible(true);
-        return $ref->invoke($object, ...$args);
-    }
-
     /**
      * A 429 carried by the event stream must activate the shared rate-limit state,
      * even though no REST call (getData/putData) was involved.
@@ -100,5 +88,17 @@ class HomeConnectCloudTest extends TestCase
         $cloud->ReceiveData('{"Event":"KEEP-ALIVE"}');
 
         $this->assertFalse($this->invoke($cloud, 'isRateLimitActive'), 'A keep-alive must not activate the rate limit');
+    }
+
+    private function cloud()
+    {
+        return IPS\InstanceManager::getInstanceInterface(IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0]);
+    }
+
+    private function invoke($object, string $method, ...$args)
+    {
+        $ref = new ReflectionMethod($object, $method);
+        $ref->setAccessible(true);
+        return $ref->invoke($object, ...$args);
     }
 }
