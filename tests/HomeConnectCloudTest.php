@@ -161,6 +161,49 @@ class HomeConnectCloudTest extends TestCase
         $this->assertStringContainsString('homeappliances/events', IPS_GetProperty($parent, 'URL'), 'Reconnect must re-arm the /events request');
     }
 
+    /**
+     * Reconnect fix: a stale keep-alive must trigger a reconnect even when the parent
+     * IO has dropped to a non-active status. The old code gated this behind
+     * HasActiveParent(), so a dead parent never recovered (keep-alives stopped for good).
+     */
+    public function testCheckServerEventsReconnectsWhenParentInactive()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+
+        //IO is configured active, but its runtime status has dropped (stream died).
+        IPS_SetProperty($parent, 'Active', true);
+        IPS_ApplyChanges($parent);
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
+        //Last keep-alive is well over 60s old -> the stream is considered dead.
+        $this->invoke($cloud, 'SetBuffer', 'KeepAlive', (string) (time() - 120));
+        IPS\InstanceManager::setStatus($parent, IS_INACTIVE);
+
+        $cloud->CheckServerEvents();
+
+        $this->assertStringContainsString('homeappliances/events', IPS_GetProperty($parent, 'URL'), 'A stale keep-alive must reconnect even when the parent is not active');
+    }
+
+    /**
+     * Reconnect fix: the error backoff must be capped at 3 minutes so a dropped stream
+     * recovers quickly. Previously it grew quadratically up to 1 hour.
+     */
+    public function testReconnectBackoffCappedAt3Minutes()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = IPS_GetInstance($cloudID)['ConnectionID'];
+
+        //Simulate many consecutive parent error status changes (retries grow to 20).
+        for ($i = 0; $i < 20; $i++) {
+            $cloud->MessageSink(0, $parent, IM_CHANGESTATUS, [IS_EBASE]);
+        }
+
+        //retries^2 would be 400s; must be capped at 180s (180000 ms).
+        $this->assertSame(180000, $this->invoke($cloud, 'GetTimerInterval', 'Reconnect'), 'Reconnect backoff must be capped at 3 minutes');
+    }
+
     private function cloud()
     {
         return IPS\InstanceManager::getInstanceInterface(IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0]);

@@ -156,13 +156,16 @@ class HomeConnectCloud extends WebOAuthModule
             switch ($MessageID) {
                 //A failing requests triggers a status change
                 case IM_CHANGESTATUS:
-                    // Update SSE if it is faulty gradually increase the reconnect interval
+                    // Update SSE if it is faulty: gradually increase the reconnect
+                    // interval, but cap it at 3 minutes. A dropped event stream must
+                    // recover quickly; the long backoff is only meant for genuine
+                    // rate-limit situations (handled separately in RegisterServerEvents).
                     if ($Data[0] >= IS_EBASE) {
                         $retries = $this->ReadAttributeInteger('RetryCounter');
                         $retries++;
                         $this->WriteAttributeInteger('RetryCounter', $retries);
                         $retryTime = pow($retries, 2);
-                        $this->SetTimerInterval('Reconnect', ($retryTime > 3600 /*1h*/ ? 3600 : $retryTime) * 1000);
+                        $this->SetTimerInterval('Reconnect', min($retryTime, 180 /* 3 min */) * 1000);
                     }
                     break;
             }
@@ -227,11 +230,13 @@ class HomeConnectCloud extends WebOAuthModule
         if ($this->isRateLimitActive()) {
             return;
         }
-        if ($this->HasActiveParent()) {
-            if (time() - intval($this->GetBuffer('KeepAlive')) > 60 /* Seconds */) {
-                $this->SendDebug('KeepAlive', 'Failed. Reregistering...', 0);
-                $this->RegisterServerEvents();
-            }
+        // A stale keep-alive means the event stream is dead - reconnect regardless of
+        // the parent's current status. Gating this behind HasActiveParent() prevented
+        // recovery exactly when the parent had dropped to an error state (keep-alives
+        // stopped and never came back).
+        if (time() - intval($this->GetBuffer('KeepAlive')) > 60 /* Seconds */) {
+            $this->SendDebug('KeepAlive', 'Failed. Reregistering...', 0);
+            $this->RegisterServerEvents();
         }
     }
 
