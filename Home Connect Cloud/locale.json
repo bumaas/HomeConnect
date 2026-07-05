@@ -17,6 +17,7 @@
             "50 calls in 1 minute": "50 Anfragen pro Minute",
             "A rate limit was reached. Requests are blocked until %s.": "Ein Anfragenlimit wurde erreicht. Weitere Anfragen werden bis %s blockiert",
             "Home Connect requests are currently rate limited.": "Home-Connect-Anfragen sind aktuell limitiert.",
+            "Home Connect request limit reached - requests are blocked until the limit resets": "Home-Connect-Anfragenlimit erreicht - Anfragen sind blockiert, bis das Limit zurückgesetzt wird",
             "https://www.symcon.de/en/service/documentation/module-reference/home-connect/": "https://www.symcon.de/de/service/dokumentation/modulreferenz/home-connect"
         }
     }
