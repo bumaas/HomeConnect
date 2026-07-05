@@ -51,6 +51,16 @@ class HomeConnectDevice extends IPSModule
     private const START_IN_RELATIVE = 'BSH.Common.Option.StartInRelative';
     private const START_IN_RELATIVE_DEVICES = ['Microwave', 'Dishwasher', 'Oven'];
 
+    // Minimum seconds between two full server refreshes (init or value refresh) of a
+    // single device. Guards against the request storm caused by bursts of CONNECTED
+    // events / parent status flaps, which quickly exhaust the "50 requests per minute"
+    // Home Connect limit and, in turn, the daily quota.
+    private const REFRESH_MIN_INTERVAL = 30;
+
+    // Counts calls to RequestDataFromParent within a single PHP call so a value
+    // refresh can report how many server requests it cost (rate-limit diagnostics).
+    private $requestCounter = 0;
+
     public function Create()
     {
         //Never delete this line!
@@ -133,7 +143,7 @@ class HomeConnectDevice extends IPSModule
         parent::ApplyChanges();
 
         if (IPS_GetKernelRunlevel() === KR_READY) {
-            $this->refreshDeviceState($this->needsInitialization());
+            $this->refreshDeviceState($this->needsInitialization(), 'ApplyChanges');
         }
 
         $this->SetReceiveDataFilter('.*' . $this->ReadPropertyString('HaID') . '.*');
@@ -146,7 +156,15 @@ class HomeConnectDevice extends IPSModule
 
         $parentID = IPS_GetInstance($this->InstanceID)['ConnectionID'];
         if ($SenderID == $parentID && $MessageID == IM_CHANGESTATUS) {
-            $this->refreshDeviceState($Data[0] == IS_ACTIVE && $this->needsInitialization());
+            // Only react to a real parent status transition. During rate-limit
+            // flapping IM_CHANGESTATUS fires many times per second with the same
+            // status; without this guard each one would trigger a refresh.
+            $newStatus = (int) $Data[0];
+            if ((int) $this->GetBuffer('LastParentStatus') === $newStatus) {
+                return;
+            }
+            $this->SetBuffer('LastParentStatus', (string) $newStatus);
+            $this->refreshDeviceState($newStatus == IS_ACTIVE && $this->needsInitialization(), sprintf('IM_CHANGESTATUS(%s)', $newStatus));
             return;
         }
 
@@ -154,7 +172,7 @@ class HomeConnectDevice extends IPSModule
             switch ($MessageID) {
                 case FM_CONNECT:
                     $this->RegisterMessage($Data[0], IM_CHANGESTATUS);
-                    $this->refreshDeviceState($this->needsInitialization());
+                    $this->refreshDeviceState($this->needsInitialization(), 'FM_CONNECT');
                     return;
 
                 case FM_DISCONNECT:
@@ -177,7 +195,7 @@ class HomeConnectDevice extends IPSModule
                 break;
             case 'CONNECTED':
                 // Device comes online, request states
-                $this->refreshDeviceState($this->needsInitialization());
+                $this->refreshDeviceState($this->needsInitialization(), 'Event:CONNECTED');
                 break;
             case 'STATUS':
             case 'NOTIFY':
@@ -405,6 +423,7 @@ class HomeConnectDevice extends IPSModule
 
     public function RequestDataFromParent(string $endpoint, string $payload = '')
     {
+        $this->requestCounter++;
         $this->SendDebug(__FUNCTION__, sprintf('endpoint: %s, payload: %s', $endpoint, $payload), 0);
         $data = [
             'DataID'      => '{41DDAA3B-65F0-B833-36EE-CEB57A80D022}',
@@ -455,18 +474,91 @@ class HomeConnectDevice extends IPSModule
         return $response;
     }
 
-    private function refreshDeviceState(bool $initializeDevice): void
+    private function refreshDeviceState(bool $initializeDevice, string $trigger = ''): void
     {
+        // DEBUG (rate-limit analysis): record every refresh, its trigger and the chosen path.
+        $this->SendDebug(__FUNCTION__, sprintf('trigger: %s, mode: %s, activeParent: %s', $trigger, $initializeDevice ? 'init' : 'valueRefresh', $this->HasActiveParent() ? 'yes' : 'no'), 0);
         if ($this->HasActiveParent() && $this->ReadPropertyString('HaID')) {
             $this->SetSummary($this->ReadPropertyString('HaID'));
+            if ($this->refreshThrottled()) {
+                // Too soon since the last refresh - skip the server round-trips but
+                // keep the instance active. Live STATUS/NOTIFY events still update
+                // values directly (they do not go through this path).
+                $this->SendDebug(__FUNCTION__, sprintf('throttled (trigger: %s)', $trigger), 0);
+                $this->setInstanceStatus(IS_ACTIVE);
+                return;
+            }
             if ($initializeDevice) {
                 $this->InitializeDevice();
+            } else {
+                // Structure is already in place; pull fresh values so a restart or
+                // reconnect does not keep showing stale status (e.g. OperationState).
+                $this->refreshDeviceValues();
             }
             $this->setInstanceStatus(IS_ACTIVE);
             return;
         }
 
         $this->setInstanceStatus(IS_INACTIVE);
+    }
+
+    /**
+     * Rate-limit guard shared by the init and the value-refresh path: allows at most
+     * one full server refresh per REFRESH_MIN_INTERVAL seconds. The timestamp lives in
+     * a runtime buffer, so it resets on restart (a restart should refresh immediately).
+     */
+    private function refreshThrottled(): bool
+    {
+        $now = time();
+        $last = (int) $this->GetBuffer('LastRefresh');
+        if ($last !== 0 && ($now - $last) < self::REFRESH_MIN_INTERVAL) {
+            return true;
+        }
+        $this->SetBuffer('LastRefresh', (string) $now);
+        return false;
+    }
+
+    /**
+     * Lightweight value refresh for an already initialized device. Only updates the
+     * values of existing variables (status, settings, selected program) without
+     * recreating variables/profiles/programs. This keeps the structure-init
+     * optimization (needsInitialization) intact while fixing stale values after a
+     * restart or event-stream reconnect.
+     */
+    private function refreshDeviceValues(): void
+    {
+        // Nothing to refresh before the structure exists - the init path handles that.
+        if (!$this->ReadAttributeBoolean('Initialized')) {
+            $this->SendDebug(__FUNCTION__, 'skipped (not initialized)', 0);
+            return;
+        }
+
+        // Count the server requests this refresh causes (rate-limit diagnostics).
+        $requestsBefore = $this->requestCounter;
+
+        // Current status values (OperationState, DoorState, restrictions, ...).
+        // Skips silently on an offline device (createStates returns false on error).
+        $this->createStates();
+
+        // Current setting values (PowerState, temperatures, ...) - values only,
+        // no per-setting constraint fetch and no profile rebuild.
+        $settings = json_decode($this->RequestDataFromParent('homeappliances/' . $this->ReadPropertyString('HaID') . '/settings'), true);
+        if (isset($settings['data']['settings'])) {
+            foreach ($settings['data']['settings'] as $setting) {
+                $ident = $this->getLastSnippet($setting['key']);
+                if (array_key_exists('value', $setting) && @IPS_GetObjectIDByIdent($ident, $this->InstanceID)) {
+                    $this->SetValue($ident, $setting['value']);
+                }
+            }
+        }
+
+        // Current selected program and its option values (only meaningful when ready).
+        if (@IPS_GetObjectIDByIdent('OperationState', $this->InstanceID)
+            && ($this->GetValue('OperationState') == 'BSH.Common.EnumType.OperationState.Ready')) {
+            $this->updateOptionValues($this->getSelectedProgram());
+        }
+
+        $this->SendDebug(__FUNCTION__, sprintf('done (%d requests)', $this->requestCounter - $requestsBefore), 0);
     }
 
     private function setInstanceStatus(int $status): void
@@ -1002,11 +1094,21 @@ class HomeConnectDevice extends IPSModule
                     //Create profile
                     IPS_CreateVariableProfile($profileName, $variableType);
                 }
-                IPS_SetVariableProfileText($profileName, '', isset($data['unit']) ? ' ' . $data['unit'] : '');
-                $min = isset($constraints['min']) ? $constraints['min'] : 0;
-                $max = isset($constraints['max']) ? $constraints['max'] : 86340;
-                IPS_SetVariableProfileValues($profileName, $min, $max, isset($constraints['stepsize']) ? $constraints['stepsize'] : 1);
-                $this->SendDebug('UpdatedProfile', $min . ' - ' . $max, 0);
+                $existingProfileType = IPS_GetVariableProfile($profileName)['ProfileType'];
+                if ($existingProfileType === VARIABLETYPE_INTEGER || $existingProfileType === VARIABLETYPE_FLOAT) {
+                    IPS_SetVariableProfileText($profileName, '', isset($data['unit']) ? ' ' . $data['unit'] : '');
+                    $min = isset($constraints['min']) ? $constraints['min'] : 0;
+                    $max = isset($constraints['max']) ? $constraints['max'] : 86340;
+                    IPS_SetVariableProfileValues($profileName, $min, $max, isset($constraints['stepsize']) ? $constraints['stepsize'] : 1);
+                    $this->SendDebug('UpdatedProfile', $min . ' - ' . $max, 0);
+                } else {
+                    // A profile with this name already exists with an incompatible
+                    // (non-numeric) type. Modifying its values would emit "String
+                    // profiles cannot be modified". Keep the existing profile and match
+                    // the variable to it instead of fighting the type.
+                    $this->SendDebug(__FUNCTION__, sprintf('Profile %s already exists as type %d; skipping numeric setup', $profileName, $existingProfileType), 0);
+                    $variableType = $existingProfileType;
+                }
                 break;
 
             case VARIABLETYPE_BOOLEAN:

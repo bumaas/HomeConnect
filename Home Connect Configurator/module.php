@@ -35,15 +35,17 @@ class HomeConnectConfigurator extends IPSModule
     public function GetConfigurationForm()
     {
         $form = json_decode(file_get_contents(__DIR__ . '/form.json'), true);
-        // Return if parent is not confiured
-        if (!$this->HasActiveParent()) {
-            return json_encode($form);
-        }
-        $homeapplianceData = json_decode($this->getHomeAppliances(), true);
+        $devices = [];
+        $knownHaIDs = [];
+
+        // Only query the live appliance list when the parent (cloud) is usable. When it
+        // is not (rate limit blocking the event stream, offline, ...) we skip discovery
+        // but still fall through to listing the already-created device instances below.
+        $homeapplianceData = $this->HasActiveParent() ? json_decode($this->getHomeAppliances(), true) : null;
         if (isset($homeapplianceData['data']) && isset($homeapplianceData['data']['homeappliances'])) {
             $homeappliances = $homeapplianceData['data']['homeappliances'];
-            $devices = [];
             foreach ($homeappliances as $homeappliance) {
+                $knownHaIDs[$homeappliance['haId']] = true;
                 $devices[] = [
                     'HaID'       => $homeappliance['haId'],
                     'Name'       => $homeappliance['name'],
@@ -62,8 +64,7 @@ class HomeConnectConfigurator extends IPSModule
                 ];
                 $this->SendDebug($homeappliance['name'], $this->getModuleIDByType($homeappliance['type']), 0);
             }
-            $form['actions'][0]['values'] = $devices;
-        } else {
+        } elseif ($homeapplianceData !== null) {
             $this->SendDebug('Error', json_encode($homeapplianceData), 0);
             $errorDescription = $this->Translate('No error description available');
             if (isset($homeapplianceData['error']) && isset($homeapplianceData['error']['description'])) {
@@ -81,6 +82,14 @@ class HomeConnectConfigurator extends IPSModule
                 ]
             ];
         }
+
+        // Always list already-created device instances so they stay visible and
+        // manageable even when the live discovery fails (e.g. rate limit / offline).
+        foreach ($this->getExistingDeviceRows($knownHaIDs) as $device) {
+            $devices[] = $device;
+        }
+
+        $form['actions'][0]['values'] = $devices;
         return json_encode($form);
     }
 
@@ -111,5 +120,36 @@ class HomeConnectConfigurator extends IPSModule
             }
         }
         return 0;
+    }
+
+    /**
+     * Build configurator rows for device instances that already exist locally but are
+     * not part of the (possibly empty) discovery result. This keeps created devices
+     * visible when the Home Connect API is unavailable (rate limit, offline, ...).
+     *
+     * @param array $knownHaIDs HaIDs already listed from the live discovery (deduplication).
+     */
+    private function getExistingDeviceRows(array $knownHaIDs)
+    {
+        $rows = [];
+        foreach (self::MODULE_TYPES as $guid) {
+            foreach (IPS_GetInstanceListByModuleID($guid) as $instanceID) {
+                $haID = (string) @IPS_GetProperty($instanceID, 'HaID');
+                if ($haID === '' || isset($knownHaIDs[$haID])) {
+                    continue;
+                }
+                $knownHaIDs[$haID] = true;
+                $deviceType = (string) @IPS_GetProperty($instanceID, 'DeviceType');
+                $rows[] = [
+                    'HaID'       => $haID,
+                    'Name'       => IPS_GetName($instanceID),
+                    'Type'       => $deviceType !== '' ? $this->Translate($deviceType) : '',
+                    'Brand'      => '',
+                    'Connected'  => '',
+                    'instanceID' => $instanceID
+                ];
+            }
+        }
+        return $rows;
     }
 }

@@ -43,5 +43,11 @@
             "onClick": "HC_RegisterServerEvents($id);"
         }
     ],
-    "status": []
+    "status": [
+        {
+            "code": 201,
+            "icon": "error",
+            "caption": "Home Connect request limit reached - requests are blocked until the limit resets"
+        }
+    ]
 }
