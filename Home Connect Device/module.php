@@ -225,7 +225,13 @@ class HomeConnectDevice extends IPSModule
                                     break;
                                 }
                                 if ($ident == 'SelectedProgram') {
-                                    $this->updateOptionValues($this->getSelectedProgram());
+                                    // Decouple the cloud lookup from the event thread: doing
+                                    // it inline blocks ReceiveData on the flow-handler thread
+                                    // while the parent is still delivering the event (re-entrant
+                                    // deadlock -> "Warten auf Skriptresultat fehlgeschlagen").
+                                    // A one-shot timer runs the refresh via RequestAction on its
+                                    // own thread; a burst of events just re-arms it (coalesces).
+                                    $this->RegisterOnceTimer('RefreshSelectedProgram', 'IPS_RequestAction($_IPS[\'TARGET\'], "RefreshSelectedProgram", "");');
                                 }
                                 if (strpos($item['key'], 'Option') != false) {
                                     $ident = 'Option' . $ident;
@@ -275,6 +281,12 @@ class HomeConnectDevice extends IPSModule
     {
         $applyValue = false;
         switch ($Ident) {
+            case 'RefreshSelectedProgram':
+                // Internal action, triggered by the one-shot timer armed in ReceiveData.
+                // Runs the deferred selected-program/option refresh off the event thread.
+                $this->updateOptionValues($this->getSelectedProgram());
+                return;
+
             case 'UseDuration':
                 $applyValue = true;
                 break;
