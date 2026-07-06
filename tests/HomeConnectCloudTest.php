@@ -204,6 +204,43 @@ class HomeConnectCloudTest extends TestCase
         $this->assertSame(180000, $this->invoke($cloud, 'GetTimerInterval', 'Reconnect'), 'Reconnect backoff must be capped at 3 minutes');
     }
 
+    /**
+     * A successful request must NOT reconnect the event stream when no rate limit was
+     * pending. Otherwise every getData()/putData() would re-register the IO (ApplyChanges)
+     * -> connection close/reopen on every operation and Event-Control status flapping.
+     */
+    public function testSuccessDoesNotReconnectWhenNoRateLimitPending()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+
+        //No rate limit pending (RateLimitUntil defaults to 0).
+        $this->invoke($cloud, 'clearRateLimitAfterSuccess');
+
+        $this->assertSame('', IPS_GetProperty($parent, 'URL'), 'A normal successful request must not re-register the event stream');
+    }
+
+    /**
+     * When a rate-limit block was pending, a successful request clears it and resumes the
+     * event stream (this is the wanted resume path).
+     */
+    public function testSuccessClearsPendingRateLimitAndResumes()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
+
+        //Simulate a pending block.
+        $this->invoke($cloud, 'WriteAttributeInteger', 'RateLimitUntil', time() + 3600);
+
+        $this->invoke($cloud, 'clearRateLimitAfterSuccess');
+
+        $this->assertFalse($this->invoke($cloud, 'isRateLimitActive'), 'Pending rate limit must be cleared');
+        $this->assertStringContainsString('homeappliances/events', IPS_GetProperty($parent, 'URL'), 'Stream must resume after the block clears');
+    }
+
     private function cloud()
     {
         return IPS\InstanceManager::getInstanceInterface(IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0]);
