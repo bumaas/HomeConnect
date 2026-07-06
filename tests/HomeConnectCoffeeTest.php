@@ -95,7 +95,46 @@ class HomeConnectCoffeeTest extends TestCase
                 'ID'    => 'SIEMENS-TI9575X1DE-68A40E251CAD'
             ]
         ));
+        //The SelectedProgram lookup is deferred via a one-shot timer -> RequestAction.
+        //Under the test stubs RegisterOnceTimer runs the script text synchronously, so the
+        //refresh has already completed by the time ReceiveData returns.
         $this->assertEquals(self::ESPRESSO, $this->getChildrenValues($coffeMaker));
+    }
+
+    /**
+     * Regression for the thread-exhaustion bug: a SelectedProgram event must not run the
+     * cloud lookup inline in ReceiveData (that ran on the flow thread while the parent was
+     * still delivering the event -> re-entrant deadlock / "Warten auf Skriptresultat
+     * fehlgeschlagen"). It is now decoupled via a one-shot timer that triggers the
+     * 'RefreshSelectedProgram' action. In production this runs on its own thread; under
+     * the stubs RegisterOnceTimer executes the action synchronously, so we assert the
+     * refresh happens through that action path (and that the action itself works).
+     */
+    public function testSelectedProgramEventRefreshesViaRequestAction()
+    {
+        $cloudInterface = IPS\InstanceManager::getInstanceInterface(IPS_GetInstanceListByModuleID('{CE76810D-B685-9BE0-CC04-38B204DEAD5E}')[0]);
+        $cloudInterface->selectedProgram = 'Coffee';
+        $coffeMaker = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
+        IPS_SetProperty($coffeMaker, 'HaID', 'SIEMENS-TI9575X1DE-68A40E251CAD');
+        IPS_SetProperty($coffeMaker, 'DeviceType', 'CoffeMaker');
+        IPS_ApplyChanges($coffeMaker);
+        $intf = IPS\InstanceManager::getInstanceInterface($coffeMaker);
+
+        //A SelectedProgram event refreshes the options via the deferred action path.
+        $cloudInterface->selectedProgram = 'Espresso';
+        HomeConnectCloud::$requestCount = 0;
+        $intf->ReceiveData(json_encode([
+            'Event' => 'NOTIFY',
+            'Data'  => '{"items":[{"handling":"none","key":"BSH.Common.Root.SelectedProgram","value":"ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso","level":"hint"}],"haId":"SIEMENS-TI9575X1DE-68A40E251CAD"}',
+            'ID'    => 'SIEMENS-TI9575X1DE-68A40E251CAD'
+        ]));
+        $this->assertGreaterThan(0, HomeConnectCloud::$requestCount, 'The deferred refresh must perform the cloud lookup');
+        $this->assertEquals(self::ESPRESSO, $this->getChildrenValues($coffeMaker), 'Options must be refreshed to the new program');
+
+        //The action handler can also be invoked directly and performs the refresh.
+        $cloudInterface->selectedProgram = 'Coffee';
+        $intf->RequestAction('RefreshSelectedProgram', '');
+        $this->assertEquals(self::COFFEE, $this->getChildrenValues($coffeMaker), 'RefreshSelectedProgram action must refresh the options');
     }
 
     private function displayChildrenValues($id)
