@@ -691,6 +691,19 @@ class HomeConnectCloud extends WebOAuthModule
         }
     }
 
+    /**
+     * Clears the rate limit after a successful request - but only if a block was actually
+     * pending. Without this guard every successful request would run ResetRateLimit() and
+     * thus ForceRegisterServerEvents()/IPS_ApplyChanges(), reconnecting the event stream on
+     * every operation (connection close/reopen, Event-Control status flapping).
+     */
+    private function clearRateLimitAfterSuccess(): void
+    {
+        if ($this->ReadAttributeInteger('RateLimitUntil') !== 0) {
+            $this->ResetRateLimit();
+        }
+    }
+
     private function getData($endpoint)
     {
         $opts = [
@@ -710,7 +723,7 @@ class HomeConnectCloud extends WebOAuthModule
             $this->SendDebug('HTTP GET Response', $result, 0);
         }
         if ($code == 200) {
-            $this->ResetRateLimit();
+            $this->clearRateLimitAfterSuccess();
         } else {
             $this->handleHttpErrors($code, $http_response_header);
         }
@@ -740,7 +753,7 @@ class HomeConnectCloud extends WebOAuthModule
             $this->SendDebug('HTTP PUT Response', $result, 0);
         }
         if ($code == 204) {
-            $this->ResetRateLimit();
+            $this->clearRateLimitAfterSuccess();
         } else {
             $this->handleHttpErrors($code, $http_response_header);
         }
@@ -773,7 +786,7 @@ class HomeConnectCloud extends WebOAuthModule
         }
 
         if ($code == 204) {
-            $this->ResetRateLimit();
+            $this->clearRateLimitAfterSuccess();
         } else {
             $this->handleHttpErrors($code, $http_response_header);
         }
