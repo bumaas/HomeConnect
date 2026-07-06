@@ -134,4 +134,35 @@ class HomeConnectFridgeFreezerTest extends TestCase
         $this->assertFalse(@IPS_GetObjectIDByIdent('OperationState', $fridge), 'Value refresh must not create OperationState');
         $this->assertNotFalse(@IPS_GetObjectIDByIdent('DoorState', $fridge), 'DoorState remains present');
     }
+
+    /**
+     * A CONNECTED event must not refresh synchronously on the event thread (that blocks
+     * ReceiveData -> "Warten auf Skriptresultat fehlgeschlagen"). It arms a one-shot timer
+     * that runs the refresh via the 'RefreshDeviceState' action. Under the stubs
+     * RegisterOnceTimer runs synchronously, so the refresh completes here (throttle cleared
+     * first so it actually runs).
+     */
+    public function testConnectedEventRefreshesViaDeferredAction()
+    {
+        $fridge = IPS_CreateInstance(self::DEVICE_GUID);
+        $parent = IPS_GetInstance($fridge)['ConnectionID'];
+        IPS\InstanceManager::setStatus($parent, IS_ACTIVE);
+
+        IPS_SetProperty($fridge, 'HaID', self::FRIDGE_HAID);
+        IPS_SetProperty($fridge, 'DeviceType', 'FridgeFreezer');
+        IPS_ApplyChanges($fridge);
+
+        $intf = IPS\InstanceManager::getInstanceInterface($fridge);
+        //Clear the 30s refresh throttle so the deferred refresh runs.
+        $setBuffer = new ReflectionMethod($intf, 'SetBuffer');
+        $setBuffer->setAccessible(true);
+        $setBuffer->invoke($intf, 'LastRefresh', '0');
+
+        HomeConnectCloud::$requestCount = 0;
+        $intf->ReceiveData(json_encode(['Event' => 'CONNECTED', 'Data' => '', 'ID' => self::FRIDGE_HAID]));
+
+        //Deferred action performed the lightweight refresh (GET /status + GET /settings).
+        $this->assertSame(2, HomeConnectCloud::$requestCount, 'CONNECTED must refresh via the deferred RefreshDeviceState action');
+        $this->assertEquals(IS_ACTIVE, IPS_GetInstance($fridge)['InstanceStatus']);
+    }
 }
