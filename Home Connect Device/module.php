@@ -194,8 +194,11 @@ class HomeConnectDevice extends IPSModule
                 }
                 break;
             case 'CONNECTED':
-                // Device comes online, request states
-                $this->refreshDeviceState($this->needsInitialization(), 'Event:CONNECTED');
+                // Device comes online -> refresh states. Decouple from the event thread:
+                // refreshDeviceState performs synchronous cloud calls, and doing them
+                // inline blocks ReceiveData while the parent is busy (e.g. reconnecting the
+                // stream) -> "Warten auf Skriptresultat fehlgeschlagen" / thread pile-up.
+                $this->RegisterOnceTimer('RefreshDeviceState', 'IPS_RequestAction($_IPS[\'TARGET\'], "RefreshDeviceState", "");');
                 break;
             case 'STATUS':
             case 'NOTIFY':
@@ -285,6 +288,12 @@ class HomeConnectDevice extends IPSModule
                 // Internal action, triggered by the one-shot timer armed in ReceiveData.
                 // Runs the deferred selected-program/option refresh off the event thread.
                 $this->updateOptionValues($this->getSelectedProgram());
+                return;
+
+            case 'RefreshDeviceState':
+                // Internal action, triggered by the one-shot timer armed on a CONNECTED
+                // event. Runs the (cloud-heavy) state refresh off the event thread.
+                $this->refreshDeviceState($this->needsInitialization(), 'Event:CONNECTED (deferred)');
                 return;
 
             case 'UseDuration':
