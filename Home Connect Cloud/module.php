@@ -14,6 +14,11 @@ class HomeConnectCloud extends WebOAuthModule
 
     //Real
     public const HOME_CONNECT_BASE = 'https://api.home-connect.com/api/';
+
+    // Custom instance status shown while the Home Connect request quota is exhausted.
+    // A code >= IS_EBASE (200) marks the instance as not usable, so child devices go
+    // inactive for the duration of the block instead of pretending to be active.
+    private const STATUS_RATE_LIMITED = 201;
     private $oauthIdentifer = 'home_connect';
 
     private $oauthServer = 'oauth.ipmagic.de';
@@ -82,6 +87,21 @@ class HomeConnectCloud extends WebOAuthModule
             $this->SendDebug('ForwardRateLimit', json_encode($error), 0);
             return json_encode($error);
         }
+
+        // DEBUG (rate-limit analysis): count every request that actually leaves for the
+        // Home Connect cloud. GET/PUT/DELETE share the account-wide 1000/day quota, so
+        // this running total shows how fast the limit is approached and which endpoint
+        // drives it. Resets automatically at the start of each day.
+        $today = date('Y-m-d');
+        $counter = json_decode($this->GetBuffer('RequestDayCount'), true);
+        if (!is_array($counter) || ($counter['date'] ?? '') !== $today) {
+            $counter = ['date' => $today, 'count' => 0];
+        }
+        $counter['count']++;
+        $this->SetBuffer('RequestDayCount', json_encode($counter));
+        $method = isset($data['Payload']) ? ($data['Payload'] === 'DELETE' ? 'DELETE' : 'PUT') : 'GET';
+        $this->SendDebug('RequestDayCount', sprintf('#%d today (%s %s)', $counter['count'], $method, $data['Endpoint'] ?? ''), 0);
+
         try {
             if (isset($data['Payload'])) {
                 $this->SendDebug('Payload', $data['Payload'], 0);
@@ -110,6 +130,13 @@ class HomeConnectCloud extends WebOAuthModule
             return;
         }
 
+        // The access token can expire while the stream is connected; Home Connect then
+        // answers /events with 401 "invalid_token". Refresh the token and reconnect
+        // immediately instead of looping on 401 until the keep-alive watchdog fires.
+        if ($this->handleExpiredTokenFromStream($JSONString)) {
+            return;
+        }
+
         $data = json_decode($JSONString, true);
         switch ($data['Event'] ?? '') {
             case 'KEEP-ALIVE': {
@@ -129,13 +156,16 @@ class HomeConnectCloud extends WebOAuthModule
             switch ($MessageID) {
                 //A failing requests triggers a status change
                 case IM_CHANGESTATUS:
-                    // Update SSE if it is faulty gradually increase the reconnect interval
+                    // Update SSE if it is faulty: gradually increase the reconnect
+                    // interval, but cap it at 3 minutes. A dropped event stream must
+                    // recover quickly; the long backoff is only meant for genuine
+                    // rate-limit situations (handled separately in RegisterServerEvents).
                     if ($Data[0] >= IS_EBASE) {
                         $retries = $this->ReadAttributeInteger('RetryCounter');
                         $retries++;
                         $this->WriteAttributeInteger('RetryCounter', $retries);
                         $retryTime = pow($retries, 2);
-                        $this->SetTimerInterval('Reconnect', ($retryTime > 3600 /*1h*/ ? 3600 : $retryTime) * 1000);
+                        $this->SetTimerInterval('Reconnect', min($retryTime, 180 /* 3 min */) * 1000);
                     }
                     break;
             }
@@ -200,11 +230,13 @@ class HomeConnectCloud extends WebOAuthModule
         if ($this->isRateLimitActive()) {
             return;
         }
-        if ($this->HasActiveParent()) {
-            if (time() - intval($this->GetBuffer('KeepAlive')) > 60 /* Seconds */) {
-                $this->SendDebug('KeepAlive', 'Failed. Reregistering...', 0);
-                $this->RegisterServerEvents();
-            }
+        // A stale keep-alive means the event stream is dead - reconnect regardless of
+        // the parent's current status. Gating this behind HasActiveParent() prevented
+        // recovery exactly when the parent had dropped to an error state (keep-alives
+        // stopped and never came back).
+        if (time() - intval($this->GetBuffer('KeepAlive')) > 60 /* Seconds */) {
+            $this->SendDebug('KeepAlive', 'Failed. Reregistering...', 0);
+            $this->RegisterServerEvents();
         }
     }
 
@@ -227,9 +259,10 @@ class HomeConnectCloud extends WebOAuthModule
         $this->SetStatus(IS_ACTIVE);
         $this->SetTimerInterval('RateLimit', 0);
 
-        // Limit is over - resume the event stream exactly once.
+        // Limit is over - re-activate the IO (stopped in applyRateLimit) and resume the
+        // event stream exactly once, with a freshly fetched access token.
         $this->SetTimerInterval('Reconnect', 0);
-        $this->RegisterServerEvents();
+        $this->ForceRegisterServerEvents();
     }
 
     public function GetConfigurationForm()
@@ -306,6 +339,30 @@ class HomeConnectCloud extends WebOAuthModule
 
         $this->SendDebug('ReceiveRateLimit', sprintf('429 from event stream, blocking for %ds', $retryAfter), 0);
         $this->applyRateLimit($retryAfter, $type);
+        return true;
+    }
+
+    /**
+     * Detects a 401 "invalid_token" carried by the SSE stream (the access token
+     * expired) and recovers by dropping the cached token and re-registering the
+     * stream with a freshly fetched one. Returns true if it was handled.
+     */
+    private function handleExpiredTokenFromStream(string $JSONString): bool
+    {
+        if (strpos($JSONString, 'invalid_token') === false && strpos($JSONString, 'access token expired') === false) {
+            return false;
+        }
+
+        // While blocked the IO is stopped and the token is refreshed on reset - do nothing.
+        if ($this->isRateLimitActive()) {
+            return true;
+        }
+
+        $this->SendDebug('ReceiveTokenExpired', 'Access token expired on event stream - refreshing token and reconnecting', 0);
+        // Re-register the stream: RegisterServerEvents calls FetchAccessToken(), which
+        // automatically refreshes an expired access token via the refresh token before
+        // re-arming the /events request. No need to wait for the keep-alive watchdog.
+        $this->ForceRegisterServerEvents();
         return true;
     }
 
@@ -607,8 +664,43 @@ class HomeConnectCloud extends WebOAuthModule
             ) : sprintf($this->Translate('A rate limit was reached. Requests are blocked until %s.'), date('d.m.Y H:i:s', $nextRun))
         );
         $this->updateRateLimitNotice();
-        if ($this->HasActiveParent() && $this->GetStatus() != IS_ACTIVE) {
-            $this->SetStatus(IS_ACTIVE);
+
+        // Stop the event-stream IO for the duration of the block. Otherwise the
+        // underlying socket keeps reconnecting to /events every ~60s (each a 429, and
+        // an endless invalid_token loop once the access token expires) - see the SSE
+        // debug. It is restarted with a fresh token in ResetRateLimit().
+        $this->stopEventStream();
+
+        // Reflect the block honestly instead of forcing IS_ACTIVE.
+        if ($this->GetStatus() != self::STATUS_RATE_LIMITED) {
+            $this->SetStatus(self::STATUS_RATE_LIMITED);
+        }
+    }
+
+    /**
+     * Deactivates the parent event-stream IO so it stops hitting /events while the
+     * request quota is exhausted. No-op if there is no (active) parent.
+     */
+    private function stopEventStream(): void
+    {
+        $parent = IPS_GetInstance($this->InstanceID)['ConnectionID'];
+        if (IPS_InstanceExists($parent) && IPS_GetProperty($parent, 'Active')) {
+            $this->SendDebug('stopEventStream', 'Deactivating event-stream IO for the duration of the block', 0);
+            IPS_SetProperty($parent, 'Active', false);
+            IPS_ApplyChanges($parent);
+        }
+    }
+
+    /**
+     * Clears the rate limit after a successful request - but only if a block was actually
+     * pending. Without this guard every successful request would run ResetRateLimit() and
+     * thus ForceRegisterServerEvents()/IPS_ApplyChanges(), reconnecting the event stream on
+     * every operation (connection close/reopen, Event-Control status flapping).
+     */
+    private function clearRateLimitAfterSuccess(): void
+    {
+        if ($this->ReadAttributeInteger('RateLimitUntil') !== 0) {
+            $this->ResetRateLimit();
         }
     }
 
@@ -631,7 +723,7 @@ class HomeConnectCloud extends WebOAuthModule
             $this->SendDebug('HTTP GET Response', $result, 0);
         }
         if ($code == 200) {
-            $this->ResetRateLimit();
+            $this->clearRateLimitAfterSuccess();
         } else {
             $this->handleHttpErrors($code, $http_response_header);
         }
@@ -661,7 +753,7 @@ class HomeConnectCloud extends WebOAuthModule
             $this->SendDebug('HTTP PUT Response', $result, 0);
         }
         if ($code == 204) {
-            $this->ResetRateLimit();
+            $this->clearRateLimitAfterSuccess();
         } else {
             $this->handleHttpErrors($code, $http_response_header);
         }
@@ -694,7 +786,7 @@ class HomeConnectCloud extends WebOAuthModule
         }
 
         if ($code == 204) {
-            $this->ResetRateLimit();
+            $this->clearRateLimitAfterSuccess();
         } else {
             $this->handleHttpErrors($code, $http_response_header);
         }
