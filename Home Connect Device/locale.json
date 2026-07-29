@@ -3,6 +3,7 @@
         "de": {
             "Control": "Steuern",
             "Program": "Programm",
+            "Active Program": "Aktives Programm",
             "DeviceType": "Gerätetyp",
             "Current Cavity Temperature": "Aktuelle Temperatur",
             "Remote control not active": "Fernsteuerung nicht aktiviert",
