@@ -205,6 +205,10 @@ class HomeConnectDevice extends IPSModule
                 $items = json_decode($data['Data'], true)['items'];
                 // $this->SendDebug($cleanData['event'], json_encode($items), 0);
                 foreach ($items as $item) {
+                    if ($item['key'] == 'BSH.Common.Root.ActiveProgram') {
+                        $this->updateActiveProgram($item['value'] ?? null);
+                        continue;
+                    }
                     if (in_array($item['key'], self::EXCLUDE)) {
                         continue;
                     }
@@ -866,6 +870,31 @@ class HomeConnectDevice extends IPSModule
             }
         }
         $this->WriteAttributeString('OptionKeys', json_encode($optionKeys));
+    }
+
+    /**
+     * Mirrors BSH.Common.Root.ActiveProgram events into a read-only display variable.
+     * Some appliances (e.g. hood fan run-on / interval venting) report the running
+     * program only via ActiveProgram, never via SelectedProgram. The variable is
+     * created on the first event, so it only shows up on devices that actually
+     * report an active program. A null value (program finished) clears the display.
+     */
+    private function updateActiveProgram($value)
+    {
+        $ident = 'ActiveProgram';
+        if (!@IPS_GetObjectIDByIdent($ident, $this->InstanceID)) {
+            if (!is_string($value) || $value == '') {
+                // Do not create the variable just to show "nothing running".
+                return;
+            }
+            $profileName = 'HomeConnect.' . $this->ReadPropertyString('DeviceType') . '.Programs';
+            if (!IPS_VariableProfileExists($profileName)) {
+                $profileName = '';
+            }
+            $this->MaintainVariable($ident, $this->Translate('Active Program'), VARIABLETYPE_STRING, $profileName, 2, true);
+        }
+        $this->SetValue($ident, is_string($value) ? $value : '');
+        $this->SendDebug(__FUNCTION__, is_string($value) ? $value : '(cleared)', 0);
     }
 
     /**
