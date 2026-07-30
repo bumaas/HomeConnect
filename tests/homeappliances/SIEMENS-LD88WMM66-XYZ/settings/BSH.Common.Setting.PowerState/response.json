@@ -1,0 +1,21 @@
+{
+    "data": {
+        "name": "Energiezustand",
+        "key": "BSH.Common.Setting.PowerState",
+        "constraints": {
+            "allowedvalues": [
+                "BSH.Common.EnumType.PowerState.Off",
+                "BSH.Common.EnumType.PowerState.On"
+            ],
+            "displayvalues": [
+                "Aus",
+                "An"
+            ],
+            "default": "BSH.Common.EnumType.PowerState.Off",
+            "access": "readWrite"
+        },
+        "type": "BSH.Common.EnumType.PowerState",
+        "displayvalue": "Aus",
+        "value": "BSH.Common.EnumType.PowerState.Off"
+    }
+}

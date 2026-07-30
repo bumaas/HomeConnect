@@ -1,0 +1,6 @@
+{
+    "error": {
+        "key": "SDK.Error.UnsupportedProgram",
+        "description": "The program is not supported"
+    }
+}

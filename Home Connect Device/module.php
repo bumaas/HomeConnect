@@ -245,6 +245,11 @@ class HomeConnectDevice extends IPSModule
                                 }
                                 if (@IPS_GetObjectIDByIdent($ident, $this->InstanceID)) {
                                     $this->SetValue($ident, $item['value']);
+                                } elseif (strpos($ident, 'Option') === 0) {
+                                    // The variable may be created only moments later by
+                                    // refreshActiveProgramOptions - keep the value so it
+                                    // does not start out empty (see rememberPendingOptionValue).
+                                    $this->rememberPendingOptionValue($ident, $item['value']);
                                 }
                                 $this->SendDebug($ident, strval($item['value']), 0);
                                 break;
@@ -298,6 +303,13 @@ class HomeConnectDevice extends IPSModule
                 // Internal action, triggered by the one-shot timer armed on a CONNECTED
                 // event. Runs the (cloud-heavy) state refresh off the event thread.
                 $this->refreshDeviceState($this->needsInitialization(), 'Event:CONNECTED (deferred)');
+                return;
+
+            case 'RefreshActiveProgramOptions':
+                // Internal action, triggered by the one-shot timer armed in
+                // updateActiveProgram(). Creates the option variables for a program
+                // that is only reported via ActiveProgram.
+                $this->refreshActiveProgramOptions();
                 return;
 
             case 'UseDuration':
@@ -729,16 +741,21 @@ class HomeConnectDevice extends IPSModule
 
     /**
      * @param string|array $program Der Programmschlüssel oder das bereits abgerufene Programmdaten-Array.
+     * @param bool $clearSelectionOnFailure Bei fehlenden Programmdaten die Programmauswahl
+     *                                      zurücksetzen (Standard, Selected-Program-Pfad) oder
+     *                                      unverändert lassen (Active-Program-Pfad).
      */
-    private function updateOptionVariables($program)
+    private function updateOptionVariables($program, $clearSelectionOnFailure = true)
     {
         $rawOptions = $this->resolveProgramData($program);
 
         $this->SendDebug('RawOptions', json_encode($rawOptions), 0);
         if (!$rawOptions) {
-            $this->SetValue('SelectedProgram', '');
-            $this->setOptionsDisabled(true);
-            $this->syncUseDurationVariable(false, 0);
+            if ($clearSelectionOnFailure) {
+                $this->SetValue('SelectedProgram', '');
+                $this->setOptionsDisabled(true);
+                $this->syncUseDurationVariable(false, 0);
+            }
             return;
         }
         $this->setOptionsDisabled(false);
@@ -893,8 +910,74 @@ class HomeConnectDevice extends IPSModule
             }
             $this->MaintainVariable($ident, $this->Translate('Active Program'), VARIABLETYPE_STRING, $profileName, 2, true);
         }
-        $this->SetValue($ident, is_string($value) ? $value : '');
-        $this->SendDebug(__FUNCTION__, is_string($value) ? $value : '(cleared)', 0);
+        $newValue = is_string($value) ? $value : '';
+        $changed = $this->GetValue($ident) != $newValue;
+        $this->SetValue($ident, $newValue);
+        $this->SendDebug(__FUNCTION__, $newValue != '' ? $newValue : '(cleared)', 0);
+        if (!$changed) {
+            return;
+        }
+        if ($newValue == '') {
+            // Program finished - drop values buffered for it.
+            $this->SetBuffer('PendingOptionValues', '');
+            return;
+        }
+        // Locally operated appliances (e.g. hoods) report their program only via
+        // ActiveProgram - no SelectedProgram event ever creates the option variables,
+        // so trigger that from here. Decoupled from the event thread (see
+        // RefreshSelectedProgram) and only on a program change, so repeated events
+        // for the same program do not cost extra server requests.
+        $this->RegisterOnceTimer('RefreshActiveProgramOptions', 'IPS_RequestAction($_IPS[\'TARGET\'], "RefreshActiveProgramOptions", "");');
+    }
+
+    /**
+     * Remembers an option value received via event while its variable does not exist
+     * yet. refreshActiveProgramOptions() applies the buffered values once the
+     * variables are created; without this, a freshly created option variable would
+     * stay empty until the appliance sends the next change (e.g. the hood's venting
+     * level, which is only reported again when the stage changes).
+     */
+    private function rememberPendingOptionValue($ident, $value)
+    {
+        $pending = json_decode($this->GetBuffer('PendingOptionValues'), true);
+        if (!is_array($pending)) {
+            $pending = [];
+        }
+        $pending[$ident] = $value;
+        $this->SetBuffer('PendingOptionValues', json_encode($pending));
+    }
+
+    /**
+     * Creates the option variables for the program reported via ActiveProgram. Hoods
+     * (and other locally operated appliances) never send a SelectedProgram event, so
+     * the regular option refresh does not run for them and events like VentingLevel
+     * had no variable to update. Uses the available-program metadata (one server
+     * request per program change) for proper profiles and constraints and
+     * deliberately leaves SelectedProgram untouched - its value feeds the Start
+     * payload. Undocumented runtime programs (e.g. an oven's ContinueCooking) are
+     * not listed under programs/available; then nothing is created and - unlike the
+     * selected-program path - nothing is cleared either.
+     */
+    private function refreshActiveProgramOptions()
+    {
+        if ($this->ReadPropertyString('HaID') == '' || !@IPS_GetObjectIDByIdent('ActiveProgram', $this->InstanceID)) {
+            return;
+        }
+        $key = $this->GetValue('ActiveProgram');
+        if (!is_string($key) || $key == '') {
+            return;
+        }
+        $this->updateOptionVariables($key, false);
+        $pending = json_decode($this->GetBuffer('PendingOptionValues'), true);
+        $this->SetBuffer('PendingOptionValues', '');
+        if (!is_array($pending)) {
+            return;
+        }
+        foreach ($pending as $ident => $value) {
+            if (@IPS_GetObjectIDByIdent($ident, $this->InstanceID)) {
+                $this->SetValue($ident, $value);
+            }
+        }
     }
 
     /**

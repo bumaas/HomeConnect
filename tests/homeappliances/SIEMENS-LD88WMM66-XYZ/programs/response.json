@@ -1,0 +1,30 @@
+{
+    "data": {
+        "programs": [
+            {
+                "key": "Cooking.Common.Program.Hood.Automatic",
+                "name": "Automatik",
+                "constraints": {
+                    "execution": "startonly",
+                    "available": true
+                }
+            },
+            {
+                "key": "Cooking.Common.Program.Hood.Venting",
+                "name": "Lüften",
+                "constraints": {
+                    "execution": "startonly",
+                    "available": true
+                }
+            },
+            {
+                "key": "Cooking.Common.Program.Hood.DelayedShutOff",
+                "name": "Lüfternachlauf",
+                "constraints": {
+                    "execution": "startonly",
+                    "available": true
+                }
+            }
+        ]
+    }
+}
