@@ -1,0 +1,46 @@
+{
+    "data": {
+        "key": "Cooking.Common.Program.Hood.Automatic",
+        "options": [
+            {
+                "key": "Cooking.Common.Option.Hood.VentingLevel",
+                "type": "Cooking.Hood.EnumType.Stage",
+                "constraints": {
+                    "allowedvalues": [
+                        "Cooking.Hood.EnumType.Stage.FanOff",
+                        "Cooking.Hood.EnumType.Stage.FanStage01",
+                        "Cooking.Hood.EnumType.Stage.FanStage02",
+                        "Cooking.Hood.EnumType.Stage.FanStage03"
+                    ],
+                    "displayvalues": [
+                        "Lüfter aus",
+                        "Lüfterstufe 1",
+                        "Lüfterstufe 2",
+                        "Lüfterstufe 3"
+                    ],
+                    "liveupdate": true
+                },
+                "name": "Lüfterstufe"
+            },
+            {
+                "key": "Cooking.Common.Option.Hood.IntensiveLevel",
+                "type": "Cooking.Hood.EnumType.IntensiveStage",
+                "constraints": {
+                    "allowedvalues": [
+                        "Cooking.Hood.EnumType.IntensiveStage.IntensiveStageOff",
+                        "Cooking.Hood.EnumType.IntensiveStage.IntensiveStage1",
+                        "Cooking.Hood.EnumType.IntensiveStage.IntensiveStage2"
+                    ],
+                    "displayvalues": [
+                        "Intensivstufe aus",
+                        "Intensivstufe 1",
+                        "Intensivstufe 2"
+                    ],
+                    "liveupdate": true
+                },
+                "name": "Intensivstufe"
+            }
+        ],
+        "name": "Automatik"
+    }
+}
