@@ -175,6 +175,51 @@ class HomeConnectHoodTest extends TestCase
         $this->assertEquals('Cooking.Common.Program.Hood.Venting', GetValue($selectedID), 'A failed program lookup must not clear the program selection');
     }
 
+    /**
+     * Hobs are monitoring-only: the API lists no programs at all, so the Programs
+     * profile stays empty and ActiveProgram used to display the raw key. The event
+     * must add a translated association for the reported program instead.
+     */
+    public function testActiveProgramAddsTranslatedProfileAssociation()
+    {
+        $hob = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
+        IPS_SetProperty($hob, 'DeviceType', 'Hob');
+        IPS_ApplyChanges($hob);
+        $intf = IPS\InstanceManager::getInstanceInterface($hob);
+
+        $intf->ReceiveData($this->generateActiveProgramEvent('Cooking.Hob.Program.PowerLevelMode'));
+
+        $variableID = IPS_GetObjectIDByIdent('ActiveProgram', $hob);
+        $this->assertNotFalse($variableID);
+        $this->assertEquals('HomeConnect.Hob.Programs', IPS_GetVariable($variableID)['VariableProfile']);
+        $associations = [];
+        foreach (IPS_GetVariableProfile('HomeConnect.Hob.Programs')['Associations'] as $association) {
+            $associations[$association['Value']] = $association['Name'];
+        }
+        // The test stub's Translate() returns the text unchanged (English key).
+        $this->assertEquals('Power level mode', $associations['Cooking.Hob.Program.PowerLevelMode']);
+    }
+
+    /**
+     * Favorites are numbered keys (BSH.Common.Program.Favorite.003) - the last
+     * snippet fallback would display the bare number.
+     */
+    public function testActiveProgramFavoriteGetsNumberedName()
+    {
+        $coffee = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
+        IPS_SetProperty($coffee, 'DeviceType', 'CoffeeMaker');
+        IPS_ApplyChanges($coffee);
+        $intf = IPS\InstanceManager::getInstanceInterface($coffee);
+
+        $intf->ReceiveData($this->generateActiveProgramEvent('BSH.Common.Program.Favorite.003'));
+
+        $associations = [];
+        foreach (IPS_GetVariableProfile('HomeConnect.CoffeeMaker.Programs')['Associations'] as $association) {
+            $associations[$association['Value']] = $association['Name'];
+        }
+        $this->assertEquals('Favorite 3', $associations['BSH.Common.Program.Favorite.003']);
+    }
+
     private function createInitializedHood()
     {
         $hood = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
