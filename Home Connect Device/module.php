@@ -20,6 +20,46 @@ class HomeConnectDevice extends IPSModule
         'BSH.Common.Option.ElapsedProgramTime'
     ];
 
+    // Programs that appliances report only via ActiveProgram events and that the
+    // API does not list under programs/available (hobs are monitoring-only, oven
+    // follow-up/cleaning modes and coffee maker auto-rinsing are started at the
+    // appliance). Values are the English display names, translated via locale.json.
+    public const EVENT_ONLY_PROGRAM_NAMES = [
+        // Hob (monitoring-only appliance)
+        'Cooking.Hob.Program.PowerLevelMode'                                                  => 'Power level mode',
+        'Cooking.Hob.Program.FryingSensorMode'                                                => 'Frying sensor mode',
+        'Cooking.Hob.Program.PowerMoveMode'                                                   => 'PowerMove mode',
+        // Hood
+        'Cooking.Common.Program.Hood.Interval'                                                => 'Interval venting',
+        // Oven follow-up / runtime modes
+        'Cooking.Oven.Program.SubsequentMode.ContinueCooking'                                 => 'Continue cooking',
+        'Cooking.Oven.Program.SubsequentMode.KeepWarm'                                        => 'Keep warm',
+        'Cooking.Oven.Program.SubsequentMode.LeaveToRest'                                     => 'Leave to rest',
+        'Cooking.Oven.Program.SubsequentMode.Microwave'                                       => 'Microwave',
+        'Cooking.Oven.Program.Dish.SubsequentCooking'                                         => 'Subsequent cooking',
+        // Oven cleaning programs (started at the appliance)
+        'Cooking.Oven.Program.Cleaning.Pyrolysis'                                             => 'Pyrolytic self-cleaning',
+        'Cooking.Oven.Program.Cleaning.Draining'                                              => 'Draining',
+        'Cooking.Oven.Program.Cleaning.Drying'                                                => 'Drying',
+        'Cooking.Oven.Program.Cleaning.Ecolysis'                                              => 'Ecolysis',
+        'Cooking.Oven.Program.CleaningModes.AutoSteamCalibration'                             => 'Auto steam calibration',
+        // Coffee maker cleaning modes (auto-rinsing runs on every power cycle)
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.ApplianceOnRinsing'               => 'Rinsing on switch-on',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.ApplianceOffRinsing'              => 'Rinsing on switch-off',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.AutoClean'                        => 'Auto clean',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.AutoDescale'                      => 'Auto descale',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.CalcNClean'                       => "calc'nClean",
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.Clean'                            => 'Clean',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.Descale'                          => 'Descale',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.CleanBrewingUnitManually'         => 'Clean brewing unit manually',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.CleanBrewingUnitManuallyDetailed' => 'Clean brewing unit manually (detailed)',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.CleanOutletManually'              => 'Clean outlet manually',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.FrostProtection'                  => 'Frost protection',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.RemoveWaterFilter'                => 'Remove water filter',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.ReplaceWaterFilter'               => 'Replace water filter',
+        'ConsumerProducts.CoffeeMaker.Program.CleaningModes.RinseMilkSystem'                  => 'Rinse milk system'
+    ];
+
     public const EVENT_DESCRIPTIONS = [
         'BSH.Common.Event.ProgramAborted'                                 => 'The program was aborted',
         'BSH.Common.Event.ProgramFinished'                                => 'The program is finished',
@@ -904,10 +944,15 @@ class HomeConnectDevice extends IPSModule
                 // Do not create the variable just to show "nothing running".
                 return;
             }
-            $profileName = 'HomeConnect.' . $this->ReadPropertyString('DeviceType') . '.Programs';
-            if (!IPS_VariableProfileExists($profileName)) {
-                $profileName = '';
-            }
+        }
+        if (is_string($value) && $value != '') {
+            // Ensure a readable display name for the reported program. Some programs
+            // never appear under programs/available (see EVENT_ONLY_PROGRAM_NAMES),
+            // so createPrograms() cannot add them to the profile - e.g. a hob's
+            // profile stays completely empty and the variable would show the raw key.
+            $profileName = $this->ensureProgramAssociation($value);
+            // Not only on creation: upgrades an ActiveProgram variable created
+            // without a profile by an earlier build (MaintainVariable is idempotent).
             $this->MaintainVariable($ident, $this->Translate('Active Program'), VARIABLETYPE_STRING, $profileName, 2, true);
         }
         $newValue = is_string($value) ? $value : '';
@@ -928,6 +973,34 @@ class HomeConnectDevice extends IPSModule
         // RefreshSelectedProgram) and only on a program change, so repeated events
         // for the same program do not cost extra server requests.
         $this->RegisterOnceTimer('RefreshActiveProgramOptions', 'IPS_RequestAction($_IPS[\'TARGET\'], "RefreshActiveProgramOptions", "");');
+    }
+
+    /**
+     * Makes sure the device-type Programs profile exists and contains an association
+     * for the given program key, so ActiveProgram displays a readable name instead of
+     * the raw key. Returns the profile name.
+     */
+    private function ensureProgramAssociation($key)
+    {
+        $profileName = 'HomeConnect.' . $this->ReadPropertyString('DeviceType') . '.Programs';
+        if (!IPS_VariableProfileExists($profileName)) {
+            IPS_CreateVariableProfile($profileName, VARIABLETYPE_STRING);
+        }
+        foreach (IPS_GetVariableProfile($profileName)['Associations'] as $association) {
+            if ($association['Value'] === $key) {
+                return $profileName;
+            }
+        }
+        if (isset(self::EVENT_ONLY_PROGRAM_NAMES[$key])) {
+            $displayName = $this->Translate(self::EVENT_ONLY_PROGRAM_NAMES[$key]);
+        } elseif (preg_match('/^BSH\.Common\.Program\.Favorite\.(?P<number>\d+)$/', $key, $matches)) {
+            // The snippet fallback would show the bare number ("003").
+            $displayName = sprintf($this->Translate('Favorite %d'), (int) $matches['number']);
+        } else {
+            $displayName = $this->getLastSnippet($key);
+        }
+        IPS_SetVariableProfileAssociation($profileName, $key, $displayName, '', -1);
+        return $profileName;
     }
 
     /**
