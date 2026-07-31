@@ -235,7 +235,19 @@ class HomeConnectCloud extends WebOAuthModule
         // recovery exactly when the parent had dropped to an error state (keep-alives
         // stopped and never came back).
         if (time() - intval($this->GetBuffer('KeepAlive')) > 60 /* Seconds */) {
-            $this->SendDebug('KeepAlive', 'Failed. Reregistering...', 0);
+            // Back off between the reconnect attempts: each one costs a GET /events
+            // against the daily quota, and on a permanently dead stream a fixed 2
+            // minute cadence burns ~700 requests per day - enough to keep the
+            // "1000 calls in 1 day" limit exhausted for good. The first retries stay
+            // fast so a briefly dropped stream still recovers quickly.
+            if (time() < intval($this->GetBuffer('WatchdogNextRetry'))) {
+                return;
+            }
+            $retries = intval($this->GetBuffer('WatchdogRetries'));
+            $delay = intval(min(120 * pow(2, $retries), 3600));
+            $this->SetBuffer('WatchdogRetries', $retries + 1);
+            $this->SetBuffer('WatchdogNextRetry', time() + $delay);
+            $this->SendDebug('KeepAlive', sprintf('Failed. Reregistering... (attempt #%d, next attempt in %ds)', $retries + 1, $delay), 0);
             $this->RegisterServerEvents();
         }
     }
@@ -370,6 +382,8 @@ class HomeConnectCloud extends WebOAuthModule
     {
         $this->SetTimerInterval('Reconnect', 0);
         $this->WriteAttributeInteger('RetryCounter', 0);
+        $this->SetBuffer('WatchdogRetries', '');
+        $this->SetBuffer('WatchdogNextRetry', '');
     }
 
     private function FetchRefreshToken($code)

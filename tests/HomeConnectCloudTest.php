@@ -241,6 +241,80 @@ class HomeConnectCloudTest extends TestCase
         $this->assertStringContainsString('homeappliances/events', IPS_GetProperty($parent, 'URL'), 'Stream must resume after the block clears');
     }
 
+    /**
+     * Watchdog backoff: on a dead stream the keep-alive watchdog must not re-register
+     * every 2 minutes forever (~700 GET /events per day, keeping the "1000 calls in
+     * 1 day" quota exhausted for good). Attempts must back off exponentially.
+     */
+    public function testCheckServerEventsBacksOffWhileStreamStaysDead()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+        IPS_SetProperty($parent, 'Active', true);
+        IPS_ApplyChanges($parent);
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
+
+        //First failure: reconnects immediately and schedules the next attempt in 120s.
+        $this->invoke($cloud, 'SetBuffer', 'KeepAlive', (string) (time() - 120));
+        $cloud->CheckServerEvents();
+        $this->assertStringContainsString('homeappliances/events', IPS_GetProperty($parent, 'URL'), 'First failure must reconnect');
+        $this->assertSame('1', (string) $this->invoke($cloud, 'GetBuffer', 'WatchdogRetries'));
+
+        //Still within the backoff window: no further reconnect.
+        IPS_SetProperty($parent, 'URL', '');
+        IPS_ApplyChanges($parent);
+        $this->invoke($cloud, 'SetBuffer', 'KeepAlive', (string) (time() - 120));
+        $cloud->CheckServerEvents();
+        $this->assertSame('', IPS_GetProperty($parent, 'URL'), 'Within the backoff window the watchdog must not reconnect');
+
+        //Backoff window elapsed: reconnects again and doubles the delay (120s -> 240s).
+        $this->invoke($cloud, 'SetBuffer', 'WatchdogNextRetry', (string) (time() - 1));
+        $cloud->CheckServerEvents();
+        $this->assertStringContainsString('homeappliances/events', IPS_GetProperty($parent, 'URL'), 'After the backoff window the watchdog must reconnect');
+        $this->assertSame('2', (string) $this->invoke($cloud, 'GetBuffer', 'WatchdogRetries'));
+        $nextRetry = intval($this->invoke($cloud, 'GetBuffer', 'WatchdogNextRetry'));
+        $this->assertGreaterThan(time() + 200, $nextRetry, 'Second attempt must schedule the next one ~240s ahead');
+    }
+
+    /**
+     * The watchdog backoff must be capped at 1 hour so a dead stream is still probed
+     * regularly (~30 requests/day) without ever burning the daily quota.
+     */
+    public function testWatchdogBackoffCappedAtOneHour()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+        IPS_SetProperty($parent, 'Active', true);
+        IPS_ApplyChanges($parent);
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
+
+        $this->invoke($cloud, 'SetBuffer', 'KeepAlive', (string) (time() - 120));
+        $this->invoke($cloud, 'SetBuffer', 'WatchdogRetries', '10');
+        $cloud->CheckServerEvents();
+
+        $nextRetry = intval($this->invoke($cloud, 'GetBuffer', 'WatchdogNextRetry'));
+        $this->assertLessThanOrEqual(time() + 3600, $nextRetry, 'Backoff must be capped at 1 hour');
+        $this->assertGreaterThan(time() + 3500, $nextRetry, 'Capped backoff must still be ~1 hour');
+    }
+
+    /**
+     * The first keep-alive after a recovery proves the stream is alive again - it must
+     * reset the watchdog backoff so a future drop reconnects quickly again.
+     */
+    public function testKeepAliveResetsWatchdogBackoff()
+    {
+        $cloud = $this->cloud();
+        $this->invoke($cloud, 'SetBuffer', 'WatchdogRetries', '5');
+        $this->invoke($cloud, 'SetBuffer', 'WatchdogNextRetry', (string) (time() + 3600));
+
+        $cloud->ReceiveData('{"Event":"KEEP-ALIVE"}');
+
+        $this->assertSame('', (string) $this->invoke($cloud, 'GetBuffer', 'WatchdogRetries'), 'A keep-alive must reset the watchdog backoff');
+        $this->assertSame('', (string) $this->invoke($cloud, 'GetBuffer', 'WatchdogNextRetry'), 'A keep-alive must clear the pending backoff window');
+    }
+
     private function cloud()
     {
         return IPS\InstanceManager::getInstanceInterface(IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0]);
