@@ -87,6 +87,20 @@ class HomeConnectDevice extends IPSModule
         'ConsumerProducts.CleaningRobot.Event.DockingStationNotFound'     => 'The robot cannot find the charging station'
 
     ];
+
+    // Appliance types for which the API provides no program list. Documented at
+    // api-docs.home-connect.com ("Programs and Options"): "There are no programs
+    // available for ..." (Refrigerator, Freezer, Fridge Freezer, Wine Cooler); for
+    // the cook processor "Program support is currently not planned to be released"
+    // (only programs/selected and programs/active work). Requesting /programs for
+    // these types is a guaranteed SDK.Error.UnsupportedOperation.
+    public const PROGRAMLESS_DEVICE_TYPES = [
+        'Refrigerator',
+        'Freezer',
+        'FridgeFreezer',
+        'WineCooler',
+        'CookProcessor'
+    ];
     private const OPTION_DURATION = 'BSH.Common.Option.Duration';
     private const START_IN_RELATIVE = 'BSH.Common.Option.StartInRelative';
     private const START_IN_RELATIVE_DEVICES = ['Microwave', 'Dishwasher', 'Oven'];
@@ -670,6 +684,10 @@ class HomeConnectDevice extends IPSModule
 
     private function createPrograms()
     {
+        if (in_array($this->ReadPropertyString('DeviceType'), self::PROGRAMLESS_DEVICE_TYPES, true)) {
+            $this->SendDebug(__FUNCTION__, 'Skipped: the API provides no programs for this appliance type', 0);
+            return;
+        }
         $rawPrograms = json_decode($this->RequestDataFromParent('homeappliances/' . $this->ReadPropertyString('HaID') . '/programs'), true);
         if (isset($rawPrograms['error'])) {
             return;
