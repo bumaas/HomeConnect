@@ -247,7 +247,12 @@ class HomeConnectCloud extends WebOAuthModule
             $delay = intval(min(120 * pow(2, $retries), 3600));
             $this->SetBuffer('WatchdogRetries', $retries + 1);
             $this->SetBuffer('WatchdogNextRetry', time() + $delay);
-            $this->SendDebug('KeepAlive', sprintf('Failed. Reregistering... (attempt #%d, next attempt in %ds)', $retries + 1, $delay), 0);
+            // Include the IO status: on a silently dead stream nothing reaches
+            // ReceiveData, so this is the only hint whether the SSE client saw an
+            // HTTP error or still believes it is connected.
+            $parent = IPS_GetInstance($this->InstanceID)['ConnectionID'];
+            $parentStatus = IPS_InstanceExists($parent) ? IPS_GetInstance($parent)['InstanceStatus'] : 0;
+            $this->SendDebug('KeepAlive', sprintf('Failed (IO status: %d). Reregistering... (attempt #%d, next attempt in %ds)', $parentStatus, $retries + 1, $delay), 0);
             $this->RegisterServerEvents();
         }
     }

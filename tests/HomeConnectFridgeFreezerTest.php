@@ -136,6 +136,31 @@ class HomeConnectFridgeFreezerTest extends TestCase
     }
 
     /**
+     * The API documents that fridge freezers have no programs at all ("There are no
+     * programs available for Fridge Freezers"), so createPrograms() must not spend a
+     * request on the guaranteed SDK.Error.UnsupportedOperation from /programs.
+     */
+    public function testCreateProgramsSkipsRequestForProgramlessType()
+    {
+        $fridge = IPS_CreateInstance(self::DEVICE_GUID);
+        $parent = IPS_GetInstance($fridge)['ConnectionID'];
+        IPS\InstanceManager::setStatus($parent, IS_ACTIVE);
+
+        IPS_SetProperty($fridge, 'HaID', self::FRIDGE_HAID);
+        IPS_SetProperty($fridge, 'DeviceType', 'FridgeFreezer');
+        IPS_ApplyChanges($fridge);
+
+        $intf = IPS\InstanceManager::getInstanceInterface($fridge);
+        HomeConnectCloud::$requestCount = 0;
+        $method = new ReflectionMethod($intf, 'createPrograms');
+        $method->setAccessible(true);
+        $method->invoke($intf);
+
+        $this->assertSame(0, HomeConnectCloud::$requestCount, 'createPrograms must not request /programs for a programless appliance type');
+        $this->assertFalse(@IPS_GetObjectIDByIdent('SelectedProgram', $fridge), 'No program selection variable for a programless appliance type');
+    }
+
+    /**
      * A CONNECTED event must not refresh synchronously on the event thread (that blocks
      * ReceiveData -> "Warten auf Skriptresultat fehlgeschlagen"). It arms a one-shot timer
      * that runs the refresh via the 'RefreshDeviceState' action. Under the stubs
