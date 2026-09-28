@@ -298,6 +298,9 @@ class HomeConnectDevice extends IPSModule
                                     $ident = 'Option' . $ident;
                                 }
                                 if (@IPS_GetObjectIDByIdent($ident, $this->InstanceID)) {
+                                    if (strpos($ident, 'Option') === 0) {
+                                        $this->ensureOptionAssociation($ident, $item['value']);
+                                    }
                                     $this->SetValue($ident, $item['value']);
                                 } elseif (strpos($ident, 'Option') === 0) {
                                     // The variable may be created only moments later by
@@ -941,6 +944,7 @@ class HomeConnectDevice extends IPSModule
                 }
                 $debugValue = is_bool($value) ? ($value ? 'true' : 'false') : $value;
                 $this->SendDebug(__FUNCTION__, sprintf('Ident: %s, Value: %s', $ident, $debugValue), 0);
+                $this->ensureOptionAssociation($ident, $value);
                 $this->SetValue($ident, $value);
             }
         }
@@ -1066,9 +1070,49 @@ class HomeConnectDevice extends IPSModule
         }
         foreach ($pending as $ident => $value) {
             if (@IPS_GetObjectIDByIdent($ident, $this->InstanceID)) {
+                $this->ensureOptionAssociation($ident, $value);
                 $this->SetValue($ident, $value);
             }
         }
+    }
+
+    /**
+     * Makes sure a string option value has an association in the variable's profile, so
+     * it never shows the raw key. Values can arrive via event before any program listing
+     * them was loaded (forum t/124612 #554). Program keys (e.g. a favorite's BaseProgram)
+     * reuse the name from the Programs profile, anything else gets the last key snippet.
+     */
+    private function ensureOptionAssociation($ident, $value)
+    {
+        if (!is_string($value) || $value == '') {
+            return;
+        }
+        $variable = IPS_GetVariable($this->GetIDForIdent($ident));
+        $profileName = $variable['VariableProfile'];
+        if ($profileName == '' || !IPS_VariableProfileExists($profileName)) {
+            return;
+        }
+        $profile = IPS_GetVariableProfile($profileName);
+        if ($profile['ProfileType'] != VARIABLETYPE_STRING) {
+            return;
+        }
+        foreach ($profile['Associations'] as $association) {
+            if ($association['Value'] === $value) {
+                return;
+            }
+        }
+        $displayName = $this->getLastSnippet($value);
+        $programsProfile = 'HomeConnect.' . $this->ReadPropertyString('DeviceType') . '.Programs';
+        if (IPS_VariableProfileExists($programsProfile)) {
+            foreach (IPS_GetVariableProfile($programsProfile)['Associations'] as $association) {
+                if ($association['Value'] === $value) {
+                    $displayName = $association['Name'];
+                    break;
+                }
+            }
+        }
+        $this->SendDebug(__FUNCTION__, sprintf('Added %s => %s to %s', $value, $displayName, $profileName), 0);
+        IPS_SetVariableProfileAssociation($profileName, $value, $displayName, '', -1);
     }
 
     /**

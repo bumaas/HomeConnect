@@ -137,6 +137,65 @@ class HomeConnectCoffeeTest extends TestCase
         $this->assertEquals(self::COFFEE, $this->getChildrenValues($coffeMaker), 'RefreshSelectedProgram action must refresh the options');
     }
 
+    /**
+     * Regression for forum t/124612 #554: option profiles are shared by all programs of a
+     * device type and hold the value list of the last loaded program only - the list feeds
+     * the selection, so it must stay exact. A value of another program must nevertheless
+     * be shown readable. Values from the real API responses: only EspressoMachiato offers
+     * BeanAmount.TripleShotPlus, Espresso offers 14 other bean amounts.
+     */
+    public function testOptionOfOtherProgramIsReadableWhileSelectionStaysExact()
+    {
+        $coffeMaker = $this->createCoffeeMaker();
+        $intf = IPS\InstanceManager::getInstanceInterface($coffeMaker);
+
+        //An ActiveProgram event loads the EspressoMachiato options (incl. TripleShotPlus).
+        $intf->ReceiveData($this->notify('BSH.Common.Root.ActiveProgram', 'ConsumerProducts.CoffeeMaker.Program.Beverage.EspressoMachiato'));
+
+        //Switching to Espresso replaces the BeanAmount list with Espresso's values.
+        IPS\InstanceManager::getInstanceInterface(IPS_GetInstanceListByModuleID('{CE76810D-B685-9BE0-CC04-38B204DEAD5E}')[0])->selectedProgram = 'Espresso';
+        $intf->ReceiveData($this->notify('BSH.Common.Root.SelectedProgram', 'ConsumerProducts.CoffeeMaker.Program.Beverage.Espresso'));
+        $profileName = IPS_GetVariable(IPS_GetObjectIDByIdent('OptionBeanAmount', $coffeMaker))['VariableProfile'];
+        $values = array_column(IPS_GetVariableProfile($profileName)['Associations'], 'Value');
+        $this->assertCount(14, $values, 'The selection must offer exactly the values of the selected program');
+        $this->assertNotContains('ConsumerProducts.CoffeeMaker.EnumType.BeanAmount.TripleShotPlus', $values);
+
+        $intf->ReceiveData($this->notify('ConsumerProducts.CoffeeMaker.Option.BeanAmount', 'ConsumerProducts.CoffeeMaker.EnumType.BeanAmount.TripleShotPlus'));
+        $this->assertSame('TripleShotPlus', $this->formatValue(IPS_GetObjectIDByIdent('OptionBeanAmount', $coffeMaker)));
+    }
+
+    /**
+     * Regression for forum t/124612 #554: an option value reported via event that is not
+     * (yet) in the profile must still get a readable name instead of the raw key.
+     */
+    public function testUnknownOptionValueGetsReadableName()
+    {
+        $coffeMaker = $this->createCoffeeMaker();
+        $intf = IPS\InstanceManager::getInstanceInterface($coffeMaker);
+
+        $intf->ReceiveData($this->notify('ConsumerProducts.CoffeeMaker.Option.BeanAmount', 'ConsumerProducts.CoffeeMaker.EnumType.BeanAmount.TripleShotPlus'));
+        $this->assertSame('TripleShotPlus', $this->formatValue(IPS_GetObjectIDByIdent('OptionBeanAmount', $coffeMaker)));
+    }
+
+    private function createCoffeeMaker(): int
+    {
+        IPS\InstanceManager::getInstanceInterface(IPS_GetInstanceListByModuleID('{CE76810D-B685-9BE0-CC04-38B204DEAD5E}')[0])->selectedProgram = 'Coffee';
+        $coffeMaker = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
+        IPS_SetProperty($coffeMaker, 'HaID', 'SIEMENS-TI9575X1DE-68A40E251CAD');
+        IPS_SetProperty($coffeMaker, 'DeviceType', 'CoffeMaker');
+        IPS_ApplyChanges($coffeMaker);
+        return $coffeMaker;
+    }
+
+    private function notify(string $key, string $value): string
+    {
+        return json_encode([
+            'Event' => 'NOTIFY',
+            'Data'  => json_encode(['items' => [['handling' => 'none', 'key' => $key, 'value' => $value, 'level' => 'hint']], 'haId' => 'SIEMENS-TI9575X1DE-68A40E251CAD']),
+            'ID'    => 'SIEMENS-TI9575X1DE-68A40E251CAD'
+        ]);
+    }
+
     private function displayChildrenValues($id)
     {
         $children = IPS_GetChildrenIDs($id);
@@ -179,9 +238,9 @@ class HomeConnectCoffeeTest extends TestCase
                 case VARIABLETYPE_BOOLEAN:
                     return $value ? $profile['Associations'][1]['Name'] : $profile['Associations'][0]['Name'];
                 case VARIABLETYPE_STRING:
-                    for ($i = count($profile['Associations']) - 1; $i >= 0; $i--) {
-                        if ($value == $profile['Associations'][$i]['Value']) {
-                            return $profile['Prefix'] . sprintf($profile['Associations'][$i]['Name'], $value) . $profile['Suffix'];
+                    foreach (array_reverse($profile['Associations']) as $association) {
+                        if ($value == $association['Value']) {
+                            return $profile['Prefix'] . sprintf($association['Name'], $value) . $profile['Suffix'];
                         }
                     }
                     return '-';
