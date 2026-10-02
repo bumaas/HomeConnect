@@ -1,0 +1,105 @@
+<?php
+
+declare(strict_types=1);
+
+include_once __DIR__ . '/stubs/GlobalStubs.php';
+include_once __DIR__ . '/stubs/KernelStubs.php';
+include_once __DIR__ . '/stubs/ModuleStubs.php';
+include_once __DIR__ . '/stubs/ConstantStubs.php';
+include_once __DIR__ . '/stubs/MessageStubs.php';
+
+use PHPUnit\Framework\TestCase;
+
+/**
+ * The device instance exposes a "Connected" variable, so a visualization can tell an
+ * appliance that is merely switched off (OperationState Inactive, still connected) from
+ * one Home Connect reports as offline.
+ *
+ * Fixtures are real captures: the dryer (BOSCH-WTX87E90) was online, the washer
+ * (BOSCH-WAV28G43) was offline when /status was requested on 02.10.2026 - Home Connect
+ * then answers with SDK.Error.HomeAppliance.Connection.Initialization.Failed.
+ */
+class HomeConnectConnectedTest extends TestCase
+{
+    private const DEVICE_GUID = '{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}';
+    private const ONLINE_HAID = 'BOSCH-WTX87E90-68A40E44C6B9';
+    private const OFFLINE_HAID = 'BOSCH-WAV28G43-68A40E970546';
+
+    protected function setUp(): void
+    {
+        //Reset
+        IPS\Kernel::reset();
+
+        //Register our core stubs for testing
+        IPS\ModuleLoader::loadLibrary(__DIR__ . '/stubs/CoreStubs/library.json');
+
+        //Register io stubs for testing - sse client
+        IPS\ModuleLoader::loadLibrary(__DIR__ . '/stubs/IOStubs/library.json');
+
+        //Register our library we need for testing
+        IPS\ModuleLoader::loadLibrary(__DIR__ . '/../library.json');
+
+        HomeConnectCloud::$requestCount = 0;
+
+        parent::setUp();
+    }
+
+    public function testOnlineDeviceIsConnected()
+    {
+        $device = $this->createDevice(self::ONLINE_HAID, 'Dryer');
+
+        $connectedID = @IPS_GetObjectIDByIdent('Connected', $device);
+        $this->assertNotFalse($connectedID, 'Every device gets a Connected variable');
+        $this->assertSame(VARIABLETYPE_BOOLEAN, IPS_GetVariable($connectedID)['VariableType']);
+        $this->assertTrue(GetValue($connectedID), 'A device answering /status is connected');
+    }
+
+    public function testOfflineDeviceIsNotConnected()
+    {
+        $device = $this->createDevice(self::OFFLINE_HAID, 'Washer');
+
+        $connectedID = @IPS_GetObjectIDByIdent('Connected', $device);
+        $this->assertNotFalse($connectedID, 'The Connected variable also exists for a device that is offline at setup');
+        $this->assertFalse(GetValue($connectedID), 'A device reported as offline by /status is not connected');
+    }
+
+    public function testDisconnectedAndConnectedEventsToggleConnected()
+    {
+        $device = $this->createDevice(self::ONLINE_HAID, 'Dryer');
+        $intf = IPS\InstanceManager::getInstanceInterface($device);
+        $connectedID = IPS_GetObjectIDByIdent('Connected', $device);
+
+        $intf->ReceiveData(json_encode(['Event' => 'DISCONNECTED', 'Data' => '', 'ID' => self::ONLINE_HAID]));
+        $this->assertFalse(GetValue($connectedID), 'DISCONNECTED clears Connected');
+        //Unchanged behavior: OperationState still falls back to Inactive.
+        $this->assertSame('BSH.Common.EnumType.OperationState.Inactive', GetValue(IPS_GetObjectIDByIdent('OperationState', $device)));
+
+        //The refresh throttle is still active here; Connected must follow the event anyway.
+        $intf->ReceiveData(json_encode(['Event' => 'CONNECTED', 'Data' => '', 'ID' => self::ONLINE_HAID]));
+        $this->assertTrue(GetValue($connectedID), 'CONNECTED sets Connected again');
+    }
+
+    public function testConnectedDoesNotChangeInstanceStatus()
+    {
+        $device = $this->createDevice(self::OFFLINE_HAID, 'Washer');
+        $this->assertEquals(IS_ACTIVE, IPS_GetInstance($device)['InstanceStatus'], 'An offline appliance is no instance error');
+
+        $intf = IPS\InstanceManager::getInstanceInterface($device);
+        $intf->ReceiveData(json_encode(['Event' => 'DISCONNECTED', 'Data' => '', 'ID' => self::OFFLINE_HAID]));
+        $this->assertEquals(IS_ACTIVE, IPS_GetInstance($device)['InstanceStatus']);
+    }
+
+    private function createDevice(string $haID, string $deviceType): int
+    {
+        $device = IPS_CreateInstance(self::DEVICE_GUID);
+        $parent = IPS_GetInstance($device)['ConnectionID'];
+        IPS\InstanceManager::getInstanceInterface($parent)->selectedProgram = 'Cotton';
+        IPS\InstanceManager::setStatus($parent, IS_ACTIVE);
+
+        IPS_SetProperty($device, 'HaID', $haID);
+        IPS_SetProperty($device, 'DeviceType', $deviceType);
+        IPS_ApplyChanges($device);
+
+        return $device;
+    }
+}

@@ -1,0 +1,6 @@
+{
+  "error": {
+    "description": "HomeAppliance is offline",
+    "key": "SDK.Error.HomeAppliance.Connection.Initialization.Failed"
+  }
+}

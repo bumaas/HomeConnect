@@ -242,12 +242,14 @@ class HomeConnectDevice extends IPSModule
         $data = json_decode($String, true);
         switch ($data['Event']) {
             case 'DISCONNECTED':
+                $this->setConnected(false);
                 if (@IPS_GetObjectIDByIdent('OperationState', $this->InstanceID)) {
                     // Offline device set OperationState to Inactive
                     $this->SetValue('OperationState', 'BSH.Common.EnumType.OperationState.Inactive');
                 }
                 break;
             case 'CONNECTED':
+                $this->setConnected(true);
                 // Device comes online -> refresh states. Decouple from the event thread:
                 // refreshDeviceState performs synchronous cloud calls, and doing them
                 // inline blocks ReceiveData while the parent is busy (e.g. reconnecting the
@@ -662,6 +664,17 @@ class HomeConnectDevice extends IPSModule
         if ($this->GetStatus() !== $status) {
             $this->SetStatus($status);
         }
+    }
+
+    /**
+     * "Connected" mirrors the connection state Home Connect reports for the appliance.
+     * OperationState Inactive cannot tell this apart: a switched-off but connected
+     * appliance reports Inactive as well.
+     */
+    private function setConnected(bool $connected): void
+    {
+        $this->MaintainVariable('Connected', $this->Translate('Connected'), VARIABLETYPE_BOOLEAN, 'HomeConnect.YesNo', 0, true);
+        $this->SetValue('Connected', $connected);
     }
 
     private function needsInitialization(): bool
@@ -1178,8 +1191,14 @@ class HomeConnectDevice extends IPSModule
         if (!$states) {
             $data = json_decode($this->RequestDataFromParent('homeappliances/' . $this->ReadPropertyString('HaID') . '/status'), true);
             if (isset($data['error'])) {
+                // Home Connect answers /status of an offline appliance with this error.
+                // Other errors (e.g. 429) say nothing about the connection.
+                if (($data['error']['key'] ?? '') === 'SDK.Error.HomeAppliance.Connection.Initialization.Failed') {
+                    $this->setConnected(false);
+                }
                 return false;
             }
+            $this->setConnected(true);
         } else {
             $data = $states;
         }

@@ -24,7 +24,8 @@ class HomeConnectCoffeeTest extends TestCase
         'RemoteControlStartAllowed' => 'Yes',
         'LocalControlActive'        => 'No',
         'Event'                     => '',
-        'EventDescription'          => ''
+        'EventDescription'          => '',
+        'Connected'                 => 'Yes'
     ];
 
     public const ESPRESSO = [
@@ -39,7 +40,8 @@ class HomeConnectCoffeeTest extends TestCase
         'RemoteControlStartAllowed' => 'Yes',
         'LocalControlActive'        => 'No',
         'Event'                     => '',
-        'EventDescription'          => ''
+        'EventDescription'          => '',
+        'Connected'                 => 'Yes'
     ];
 
     protected function setUp(): void
