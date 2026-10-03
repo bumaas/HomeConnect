@@ -1,0 +1,64 @@
+{
+  "data": {
+    "key": "Dishcare.Dishwasher.Program.Auto2",
+    "name": "Auto 45-65°",
+    "options": [
+      {
+        "name": "Startzeit",
+        "key": "BSH.Common.Option.StartInRelative",
+        "constraints": {
+          "min": 0,
+          "max": 86400,
+          "liveupdate": true
+        },
+        "unit": "seconds",
+        "type": "Int"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.HygienePlus",
+        "type": "Boolean",
+        "constraints": {
+          "default": false,
+          "liveupdate": true
+        },
+        "name": "HygienePlus"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.HalfLoad",
+        "type": "Boolean",
+        "constraints": {
+          "default": false,
+          "liveupdate": true
+        },
+        "name": "Halbe Beladung"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.IntensivZone",
+        "type": "Boolean",
+        "constraints": {
+          "default": false,
+          "liveupdate": true
+        },
+        "name": "IntensivZone"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.VarioSpeedPlus",
+        "type": "Boolean",
+        "constraints": {
+          "default": false,
+          "liveupdate": true
+        },
+        "name": "VarioSpeedPlus"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.BrillianceDry",
+        "type": "Boolean",
+        "constraints": {
+          "default": false,
+          "liveupdate": true
+        },
+        "name": "Glanztrocknen"
+      }
+    ]
+  }
+}

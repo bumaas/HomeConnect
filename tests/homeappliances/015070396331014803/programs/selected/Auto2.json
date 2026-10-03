@@ -1,0 +1,68 @@
+{
+  "data": {
+    "constraints": {
+      "access": "readWrite"
+    },
+    "key": "Dishcare.Dishwasher.Program.Auto2",
+    "name": "Auto 45-65°",
+    "options": [
+      {
+        "key": "BSH.Common.Option.StartInRelative",
+        "value": 0,
+        "unit": "seconds",
+        "name": "Startzeit"
+      },
+      {
+        "key": "BSH.Common.Option.SmartEnergyService.SmartStartEnabled",
+        "value": false
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.HygienePlus",
+        "value": false,
+        "name": "HygienePlus"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.HalfLoad",
+        "value": false,
+        "name": "Halbe Beladung"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.IntensivZone",
+        "value": false,
+        "name": "IntensivZone"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.VarioSpeedPlus",
+        "value": false,
+        "name": "VarioSpeedPlus"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.BrillianceDry",
+        "value": false,
+        "name": "Glanztrocknen"
+      },
+      {
+        "key": "Dishcare.Dishwasher.Option.SilenceOnDemand",
+        "value": false,
+        "name": "Jetzt Leise"
+      },
+      {
+        "key": "BSH.Common.Option.RemainingProgramTimeIsEstimated",
+        "value": true,
+        "name": "Geschätzte Restprogrammlaufzeit"
+      },
+      {
+        "key": "BSH.Common.Option.EnergyForecast",
+        "value": 58,
+        "unit": "%",
+        "name": "Energie"
+      },
+      {
+        "key": "BSH.Common.Option.WaterForecast",
+        "value": 49,
+        "unit": "%",
+        "name": "Wasser"
+      }
+    ]
+  }
+}
