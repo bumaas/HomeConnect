@@ -1,0 +1,16 @@
+{
+  "data": {
+    "name": "Basisdosiermenge: Waschmittel",
+    "key": "LaundryCare.Washer.Setting.IDos1BaseLevel",
+    "constraints": {
+      "min": 5,
+      "max": 200,
+      "stepsize": 1,
+      "default": 36,
+      "access": "readWrite"
+    },
+    "unit": "ml",
+    "type": "Int",
+    "value": 50
+  }
+}

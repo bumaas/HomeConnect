@@ -1,0 +1,24 @@
+{
+  "data": {
+    "settings": [
+      {
+        "key": "BSH.Common.Setting.PowerState",
+        "value": "BSH.Common.EnumType.PowerState.Off",
+        "name": "Energiezustand",
+        "displayvalue": "Aus"
+      },
+      {
+        "key": "LaundryCare.Washer.Setting.IDos1BaseLevel",
+        "value": 50,
+        "unit": "ml",
+        "name": "Basisdosiermenge: Waschmittel"
+      },
+      {
+        "key": "LaundryCare.Washer.Setting.IDos2BaseLevel",
+        "value": 65,
+        "unit": "ml",
+        "name": "Basisdosiermenge: Waschmittel oder Weichspüler"
+      }
+    ]
+  }
+}

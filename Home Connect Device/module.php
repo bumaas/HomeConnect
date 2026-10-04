@@ -303,6 +303,10 @@ class HomeConnectDevice extends IPSModule
                                 if (@IPS_GetObjectIDByIdent($ident, $this->InstanceID)) {
                                     if (strpos($ident, 'Option') === 0) {
                                         $this->ensureOptionAssociation($ident, $item['value']);
+                                    } elseif ($ident == 'SelectedProgram' && is_string($item['value']) && $item['value'] != '') {
+                                        // Programs chosen at the appliance are reported here
+                                        // although programs does not list them.
+                                        $this->ensureProgramAssociation($item['value']);
                                     }
                                     $this->SetValue($ident, $item['value']);
                                 } elseif (strpos($ident, 'Option') === 0) {
@@ -729,6 +733,12 @@ class HomeConnectDevice extends IPSModule
         $ident = 'SelectedProgram';
         $this->MaintainVariable($ident, $this->Translate('Program'), VARIABLETYPE_STRING, $profileName, 1, true);
         $this->EnableAction($ident);
+        // The rebuild keeps only the listed programs. A program chosen at the appliance
+        // and still selected would show its raw key until the next event.
+        $selectedProgram = $this->GetValue($ident);
+        if (is_string($selectedProgram) && $selectedProgram != '') {
+            $this->ensureProgramAssociation($selectedProgram);
+        }
         return true;
     }
 
@@ -939,6 +949,7 @@ class HomeConnectDevice extends IPSModule
             $this->syncUseDurationVariable(false, 0);
             return;
         }
+        $this->ensureProgramAssociation($program['key']);
         $this->SetValue('SelectedProgram', $program['key']);
         $this->updateOptionVariables($program);
         $optionKeys = [];
@@ -1034,7 +1045,7 @@ class HomeConnectDevice extends IPSModule
             // The snippet fallback would show the bare number ("003").
             $displayName = sprintf($this->Translate('Favorite %d'), (int) $matches['number']);
         } else {
-            $displayName = $this->getLastSnippet($key);
+            $displayName = $this->getReadableName($key);
         }
         IPS_SetVariableProfileAssociation($profileName, $key, $displayName, '', -1);
         return $profileName;
@@ -1283,6 +1294,15 @@ class HomeConnectDevice extends IPSModule
     private function getLastSnippet($string)
     {
         return substr($string, strrpos($string, '.') + 1, strlen($string) - strrpos($string, '.'));
+    }
+
+    /**
+     * Readable name built from the last key snippet for keys without a known name
+     * (SaltNearlyEmpty -> "Salt Nearly Empty", DelicatesSilk -> "Delicates Silk").
+     */
+    private function getReadableName(string $key): string
+    {
+        return trim(preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', ' ', $this->getLastSnippet($key)));
     }
 
     private function createAssociations($profileName, $associations)
@@ -1586,7 +1606,7 @@ class HomeConnectDevice extends IPSModule
                 return;
             }
         }
-        $displayName = trim(preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', ' ', $this->getLastSnippet($key)));
+        $displayName = $this->getReadableName($key);
         foreach ($this->getEventAssociations($this->ReadPropertyString('DeviceType')) as $association) {
             if ($association['Value'] === $key) {
                 $displayName = $this->Translate($association['Name']);
