@@ -190,4 +190,28 @@ class HomeConnectFridgeFreezerTest extends TestCase
         $this->assertSame(2, HomeConnectCloud::$requestCount, 'CONNECTED must refresh via the deferred RefreshDeviceState action');
         $this->assertEquals(IS_ACTIVE, IPS_GetInstance($fridge)['InstanceStatus']);
     }
+
+    /**
+     * Review finding 7: an option or setting profile that already exists with the other
+     * numeric type (INTEGER vs. FLOAT) passed the type guard, so the variable was created
+     * with its own type against a mismatching profile - Symcon rejects that and the
+     * variable is not created. The variable must follow the existing profile instead.
+     * The setting is real (/settings of the fridge); only the stale profile is staged.
+     */
+    public function testNumericSettingFollowsExistingProfileType()
+    {
+        $profile = 'Refrigeration.FridgeFreezer.Setting.SetpointTemperatureRefrigerator';
+        IPS_CreateVariableProfile($profile, VARIABLETYPE_FLOAT);
+
+        $fridge = IPS_CreateInstance(self::DEVICE_GUID);
+        $parent = IPS_GetInstance($fridge)['ConnectionID'];
+        IPS\InstanceManager::setStatus($parent, IS_ACTIVE);
+        IPS_SetProperty($fridge, 'HaID', self::FRIDGE_HAID);
+        IPS_SetProperty($fridge, 'DeviceType', 'FridgeFreezer');
+        IPS_ApplyChanges($fridge);
+
+        $variableID = @IPS_GetObjectIDByIdent('SetpointTemperatureRefrigerator', $fridge);
+        $this->assertNotFalse($variableID, 'The setting variable must be created despite the existing profile');
+        $this->assertSame(VARIABLETYPE_FLOAT, IPS_GetVariable($variableID)['VariableType'], 'The variable follows the type of the existing profile');
+    }
 }

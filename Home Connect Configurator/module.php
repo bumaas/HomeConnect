@@ -132,8 +132,15 @@ class HomeConnectConfigurator extends IPSModule
     private function getExistingDeviceRows(array $knownHaIDs)
     {
         $rows = [];
+        $cloudID = IPS_GetInstance($this->InstanceID)['ConnectionID'];
         foreach (self::MODULE_TYPES as $guid) {
             foreach (IPS_GetInstanceListByModuleID($guid) as $instanceID) {
+                // Only devices of this cloud (or of none) - the rows can be deleted from
+                // here, and a second cloud instance belongs to another account.
+                $deviceCloudID = IPS_GetInstance($instanceID)['ConnectionID'];
+                if ($deviceCloudID !== $cloudID && $deviceCloudID !== 0) {
+                    continue;
+                }
                 $haID = (string) @IPS_GetProperty($instanceID, 'HaID');
                 if ($haID === '' || isset($knownHaIDs[$haID])) {
                     continue;

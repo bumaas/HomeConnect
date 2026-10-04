@@ -183,45 +183,22 @@ class HomeConnectCloud extends WebOAuthModule
     public function ForceRegisterServerEvents()
     {
         $parent = IPS_GetInstance($this->InstanceID)['ConnectionID'];
-        if (IPS_InstanceExists($parent)) {
-            IPS_SetProperty($parent, 'Active', true);
-            IPS_ApplyChanges($parent);
-            $this->RegisterServerEvents();
+        if (IPS_InstanceExists($parent) && !$this->deferWhileRateLimited()) {
+            $this->connectEventStream(true, true);
         }
     }
 
     public function RegisterServerEvents()
     {
-        // Do not (re)connect the event stream while we are rate limited - every
-        // reconnect hits /events and counts against the daily quota. Defer the
-        // reconnect to the moment the limit expires instead.
-        if ($this->isRateLimitActive()) {
-            $remaining = $this->ReadAttributeInteger('RateLimitUntil') - time();
-            $this->SendDebug('RegisterServerEvents', sprintf('Rate limit active, defer reconnect by %ds', $remaining), 0);
-            $this->SetTimerInterval('Reconnect', max(1, $remaining) * 1000);
+        if ($this->deferWhileRateLimited()) {
             return;
         }
-        try {
-            $url = self::HOME_CONNECT_BASE . 'homeappliances/events';
-            $this->SendDebug('url', $url, 0);
-            $parent = IPS_GetInstance($this->InstanceID)['ConnectionID'];
-            if (!IPS_GetProperty($parent, 'Active')) {
-                echo $this->Translate('IO instance is not active');
-                return;
-            }
-            IPS_SetProperty($parent, 'URL', $url);
-            IPS_SetProperty($parent, 'Headers', json_encode([['Name' => 'Authorization', 'Value' => 'Bearer ' . $this->FetchAccessToken()]]));
-            IPS_ApplyChanges($parent);
-
-            // Mark connection as good for the moment
-            $this->SetBuffer('KeepAlive', time());
-
-            $this->SetTimerInterval('Reconnect', 0);
-        } catch (RuntimeException $e) {
-            $error = $this->DecodeModuleError($e);
-            $this->SendDebug('RegisterServerEventsError', json_encode($error), 0);
-            echo $error['error']['description'];
+        $parent = IPS_GetInstance($this->InstanceID)['ConnectionID'];
+        if (!IPS_GetProperty($parent, 'Active')) {
+            echo $this->Translate('IO instance is not active');
+            return;
         }
+        $this->connectEventStream(false, true);
     }
 
     public function CheckServerEvents()
@@ -232,11 +209,20 @@ class HomeConnectCloud extends WebOAuthModule
         }
         // A block that has expired but was never lifted: a restart during the block
         // resets the RateLimit timer, while RateLimitUntil and the IO deactivated by
-        // applyRateLimit persist. Lift it here, otherwise the stream stays dead.
-        if ($this->ReadAttributeInteger('RateLimitUntil') !== 0) {
-            $this->SendDebug('KeepAlive', 'Expired rate limit was not lifted - resetting', 0);
-            $this->ResetRateLimit();
-            return;
+        // applyRateLimit persist; or the stream could not be resumed when it ended.
+        // Lift it here, otherwise the stream stays dead.
+        $blockPending = $this->ReadAttributeInteger('RateLimitUntil') !== 0;
+        if (!$blockPending) {
+            // Nothing to reconnect: the user switched the IO off, or the login is
+            // missing. Stay silent - output of a timer ends up as a log warning.
+            $parent = IPS_GetInstance($this->InstanceID)['ConnectionID'];
+            if (!IPS_InstanceExists($parent) || !IPS_GetProperty($parent, 'Active')) {
+                return;
+            }
+            if (trim($this->ReadAttributeString('Token')) === '') {
+                $this->SendDebug('KeepAlive', 'Not registered - no reconnect', 0);
+                return;
+            }
         }
         // A stale keep-alive means the event stream is dead - reconnect regardless of
         // the parent's current status. Gating this behind HasActiveParent() prevented
@@ -261,7 +247,12 @@ class HomeConnectCloud extends WebOAuthModule
             $parent = IPS_GetInstance($this->InstanceID)['ConnectionID'];
             $parentStatus = IPS_InstanceExists($parent) ? IPS_GetInstance($parent)['InstanceStatus'] : 0;
             $this->SendDebug('KeepAlive', sprintf('Failed (IO status: %d). Reregistering... (attempt #%d, next attempt in %ds)', $parentStatus, $retries + 1, $delay), 0);
-            $this->RegisterServerEvents();
+            if ($blockPending) {
+                $this->SendDebug('KeepAlive', 'Expired rate limit was not lifted - resetting', 0);
+                $this->ResetRateLimit();
+            } else {
+                $this->connectEventStream(false, false);
+            }
         }
     }
 
@@ -278,15 +269,18 @@ class HomeConnectCloud extends WebOAuthModule
 
     public function ResetRateLimit()
     {
+        $this->SetTimerInterval('RateLimit', 0);
+        $this->SetTimerInterval('Reconnect', 0);
+
+        // Limit is over - re-activate the IO (stopped in applyRateLimit) and resume the
+        // event stream exactly once, with a freshly fetched access token. If that fails
+        // (no token), the expired block stays pending and the keep-alive watchdog retries.
+        if (!$this->connectEventStream(true, false)) {
+            return;
+        }
         $this->WriteAttributeString('RateError', '');
         $this->WriteAttributeInteger('RateLimitUntil', 0);
         $this->updateRateLimitNotice();
-        $this->SetTimerInterval('RateLimit', 0);
-
-        // Limit is over - re-activate the IO (stopped in applyRateLimit) and resume the
-        // event stream exactly once, with a freshly fetched access token.
-        $this->SetTimerInterval('Reconnect', 0);
-        $this->ForceRegisterServerEvents();
 
         // Only now report IS_ACTIVE: children answer the status change with
         // HasActiveParent(), which walks up to the IO. Seeing it still inactive they
@@ -393,7 +387,7 @@ class HomeConnectCloud extends WebOAuthModule
         // local expiry (clock skew, revocation). Drop it, so FetchAccessToken() in
         // RegisterServerEvents fetches a new one instead of re-sending the rejected one.
         $this->SetBuffer('AccessToken', '');
-        $this->ForceRegisterServerEvents();
+        $this->connectEventStream(true, false);
         return true;
     }
 
@@ -722,6 +716,62 @@ class HomeConnectCloud extends WebOAuthModule
             IPS_SetProperty($parent, 'Active', false);
             IPS_ApplyChanges($parent);
         }
+    }
+
+    /**
+     * Do not (re)connect the event stream while we are rate limited - every reconnect
+     * hits /events and counts against the daily quota. Defers the reconnect to the
+     * moment the limit expires instead. Returns true if it deferred.
+     */
+    private function deferWhileRateLimited(): bool
+    {
+        if (!$this->isRateLimitActive()) {
+            return false;
+        }
+        $remaining = $this->ReadAttributeInteger('RateLimitUntil') - time();
+        $this->SendDebug('RegisterServerEvents', sprintf('Rate limit active, defer reconnect by %ds', $remaining), 0);
+        $this->SetTimerInterval('Reconnect', max(1, $remaining) * 1000);
+        return true;
+    }
+
+    /**
+     * Points the event-stream IO at /events with a current access token and applies it
+     * once. The token is fetched first: without one the IO is left untouched instead of
+     * connecting with a stale header. $activate also switches the IO on. $report echoes
+     * an error - only for calls by the user, output of a timer ends up in the log.
+     * Returns true if the stream was registered.
+     */
+    private function connectEventStream(bool $activate, bool $report): bool
+    {
+        $parent = IPS_GetInstance($this->InstanceID)['ConnectionID'];
+        if (!IPS_InstanceExists($parent)) {
+            return false;
+        }
+        try {
+            $token = $this->FetchAccessToken();
+        } catch (RuntimeException $e) {
+            $error = $this->DecodeModuleError($e);
+            $this->SendDebug('RegisterServerEventsError', json_encode($error), 0);
+            if ($report) {
+                echo $error['error']['description'];
+            }
+            return false;
+        }
+
+        $url = self::HOME_CONNECT_BASE . 'homeappliances/events';
+        $this->SendDebug('url', $url, 0);
+        if ($activate) {
+            IPS_SetProperty($parent, 'Active', true);
+        }
+        IPS_SetProperty($parent, 'URL', $url);
+        IPS_SetProperty($parent, 'Headers', json_encode([['Name' => 'Authorization', 'Value' => 'Bearer ' . $token]]));
+        IPS_ApplyChanges($parent);
+
+        // Mark connection as good for the moment
+        $this->SetBuffer('KeepAlive', time());
+
+        $this->SetTimerInterval('Reconnect', 0);
+        return true;
     }
 
     /**

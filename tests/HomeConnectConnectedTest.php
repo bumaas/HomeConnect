@@ -89,6 +89,48 @@ class HomeConnectConnectedTest extends TestCase
         $this->assertEquals(IS_ACTIVE, IPS_GetInstance($device)['InstanceStatus']);
     }
 
+    /**
+     * Review finding 4: an appliance that is offline when its instance is set up keeps
+     * Initialized = false. When it comes online within REFRESH_MIN_INTERVAL, the CONNECTED
+     * refresh is throttled - and nothing ever retried the pending initialization, so the
+     * instance stayed without its variables. A throttled init must schedule a retry.
+     */
+    public function testThrottledInitializationIsRetried()
+    {
+        $device = $this->createDevice(self::OFFLINE_HAID, 'Washer');
+        $intf = IPS\InstanceManager::getInstanceInterface($device);
+        $this->assertFalse($this->invoke($intf, 'ReadAttributeBoolean', 'Initialized'), 'Setup of an offline appliance does not initialize');
+
+        //The appliance comes online right after the setup.
+        $intf->ReceiveData(json_encode(['Event' => 'CONNECTED', 'Data' => '', 'ID' => self::OFFLINE_HAID]));
+
+        $retry = $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh');
+        $this->assertGreaterThan(0, $retry, 'A throttled initialization must be retried');
+        $this->assertLessThanOrEqual(31000, $retry, 'The retry follows once the throttle window has passed');
+    }
+
+    /**
+     * Counterpart to finding 4: a throttled value refresh of an initialized appliance needs
+     * no retry - live STATUS/NOTIFY events keep its values current.
+     */
+    public function testThrottledValueRefreshIsNotRetried()
+    {
+        $device = $this->createDevice(self::ONLINE_HAID, 'Dryer');
+        $intf = IPS\InstanceManager::getInstanceInterface($device);
+
+        $intf->ReceiveData(json_encode(['Event' => 'CONNECTED', 'Data' => '', 'ID' => self::ONLINE_HAID]));
+
+        //The stub reports a stopped timer as 0 minus the elapsed time.
+        $this->assertLessThanOrEqual(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'No retry for a value refresh');
+    }
+
+    private function invoke($object, string $method, ...$args)
+    {
+        $ref = new ReflectionMethod($object, $method);
+        $ref->setAccessible(true);
+        return $ref->invoke($object, ...$args);
+    }
+
     private function createDevice(string $haID, string $deviceType): int
     {
         $device = IPS_CreateInstance(self::DEVICE_GUID);

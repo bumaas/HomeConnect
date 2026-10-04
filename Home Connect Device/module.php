@@ -138,6 +138,9 @@ class HomeConnectDevice extends IPSModule
         $this->RegisterAttributeString('InitializationSignature', '');
         $this->RegisterAttributeBoolean('Initialized', false);
 
+        // Retries an initialization the refresh throttle had to skip.
+        $this->RegisterTimer('RetryRefresh', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], "RefreshDeviceState", "");');
+
         //Common States
         //States
         if (!IPS_VariableProfileExists('HomeConnect.Common.Status.OperationState')) {
@@ -576,17 +579,30 @@ class HomeConnectDevice extends IPSModule
         return $response;
     }
 
+    // Time source for the module timers of the test stubs (as in WebOAuthModule).
+    protected function getTime(): int
+    {
+        return time();
+    }
+
     private function refreshDeviceState(bool $initializeDevice, string $trigger = ''): void
     {
         // DEBUG (rate-limit analysis): record every refresh, its trigger and the chosen path.
         $this->SendDebug(__FUNCTION__, sprintf('trigger: %s, mode: %s, activeParent: %s', $trigger, $initializeDevice ? 'init' : 'valueRefresh', $this->HasActiveParent() ? 'yes' : 'no'), 0);
+        // Any refresh supersedes a pending retry; a throttled init re-arms it below.
+        $this->SetTimerInterval('RetryRefresh', 0);
         if ($this->HasActiveParent() && $this->ReadPropertyString('HaID')) {
             $this->SetSummary($this->ReadPropertyString('HaID'));
-            if ($this->refreshThrottled()) {
+            $wait = $this->refreshThrottled();
+            if ($wait > 0) {
                 // Too soon since the last refresh - skip the server round-trips but
                 // keep the instance active. Live STATUS/NOTIFY events still update
-                // values directly (they do not go through this path).
+                // values directly (they do not go through this path). A skipped
+                // initialization has no such substitute: retry it after the window.
                 $this->SendDebug(__FUNCTION__, sprintf('throttled (trigger: %s)', $trigger), 0);
+                if ($initializeDevice) {
+                    $this->SetTimerInterval('RetryRefresh', $wait * 1000);
+                }
                 $this->setInstanceStatus(IS_ACTIVE);
                 return;
             }
@@ -608,16 +624,18 @@ class HomeConnectDevice extends IPSModule
      * Rate-limit guard shared by the init and the value-refresh path: allows at most
      * one full server refresh per REFRESH_MIN_INTERVAL seconds. The timestamp lives in
      * a runtime buffer, so it resets on restart (a restart should refresh immediately).
+     * Returns the seconds to wait, 0 if the refresh may run (and records it).
      */
-    private function refreshThrottled(): bool
+    private function refreshThrottled(): int
     {
         $now = time();
         $last = (int) $this->GetBuffer('LastRefresh');
         if ($last !== 0 && ($now - $last) < self::REFRESH_MIN_INTERVAL) {
-            return true;
+            // Seconds until the next refresh is allowed.
+            return self::REFRESH_MIN_INTERVAL - ($now - $last);
         }
         $this->SetBuffer('LastRefresh', (string) $now);
-        return false;
+        return 0;
     }
 
     /**
@@ -1404,18 +1422,19 @@ class HomeConnectDevice extends IPSModule
                     IPS_CreateVariableProfile($profileName, $variableType);
                 }
                 $existingProfileType = IPS_GetVariableProfile($profileName)['ProfileType'];
-                if ($existingProfileType === VARIABLETYPE_INTEGER || $existingProfileType === VARIABLETYPE_FLOAT) {
+                if ($existingProfileType === $variableType) {
                     IPS_SetVariableProfileText($profileName, '', isset($data['unit']) ? ' ' . $data['unit'] : '');
                     $min = isset($constraints['min']) ? $constraints['min'] : 0;
                     $max = isset($constraints['max']) ? $constraints['max'] : 86340;
                     IPS_SetVariableProfileValues($profileName, $min, $max, isset($constraints['stepsize']) ? $constraints['stepsize'] : 1);
                     $this->SendDebug('UpdatedProfile', $min . ' - ' . $max, 0);
                 } else {
-                    // A profile with this name already exists with an incompatible
-                    // (non-numeric) type. Modifying its values would emit "String
-                    // profiles cannot be modified". Keep the existing profile and match
-                    // the variable to it instead of fighting the type.
-                    $this->SendDebug(__FUNCTION__, sprintf('Profile %s already exists as type %d; skipping numeric setup', $profileName, $existingProfileType), 0);
+                    // A profile with this name already exists with another type - non-numeric
+                    // (modifying its values would emit "String profiles cannot be modified")
+                    // or the other numeric type (Symcon rejects a variable whose type does
+                    // not match its profile). Keep the existing profile and match the
+                    // variable to it instead of fighting the type.
+                    $this->SendDebug(__FUNCTION__, sprintf('Profile %s already exists as type %d; skipping profile setup', $profileName, $existingProfileType), 0);
                     $variableType = $existingProfileType;
                 }
                 break;
