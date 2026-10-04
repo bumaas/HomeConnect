@@ -1,40 +1,40 @@
 {
-  "data": {
-    "active": {
-      "constraints": {
-        "access": "read"
-      }
-    },
-    "programs": [
-      {
-        "constraints": {
-          "available": true,
-          "execution": "selectandstart"
+    "data": {
+        "active": {
+            "constraints": {
+                "access": "read"
+            }
         },
-        "key": "LaundryCare.WasherDryer.Program.Cotton.Eco4060",
-        "name": "Eco 40-60"
-      },
-      {
-        "constraints": {
-          "available": true,
-          "execution": "selectandstart"
-        },
-        "key": "LaundryCare.WasherDryer.Program.Cotton",
-        "name": "Baumwolle"
-      },
-      {
-        "constraints": {
-          "available": true,
-          "execution": "selectandstart"
-        },
-        "key": "LaundryCare.WasherDryer.Program.Mix",
-        "name": "Schnell/Mix"
-      }
-    ],
-    "selected": {
-      "constraints": {
-        "access": "read"
-      }
+        "programs": [
+            {
+                "constraints": {
+                    "available": true,
+                    "execution": "selectandstart"
+                },
+                "key": "LaundryCare.WasherDryer.Program.Cotton.Eco4060",
+                "name": "Eco 40-60"
+            },
+            {
+                "constraints": {
+                    "available": true,
+                    "execution": "selectandstart"
+                },
+                "key": "LaundryCare.WasherDryer.Program.Cotton",
+                "name": "Baumwolle"
+            },
+            {
+                "constraints": {
+                    "available": true,
+                    "execution": "selectandstart"
+                },
+                "key": "LaundryCare.WasherDryer.Program.Mix",
+                "name": "Schnell/Mix"
+            }
+        ],
+        "selected": {
+            "constraints": {
+                "access": "read"
+            }
+        }
     }
-  }
 }

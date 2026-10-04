@@ -1,33 +1,33 @@
 {
-  "data": {
-    "status": [
-      {
-        "key": "BSH.Common.Status.DoorState",
-        "value": "BSH.Common.EnumType.DoorState.Open",
-        "name": "Tür",
-        "displayvalue": "Offen"
-      },
-      {
-        "key": "BSH.Common.Status.LocalControlActive",
-        "value": false,
-        "name": "Lokale Bedienung aktiv"
-      },
-      {
-        "key": "BSH.Common.Status.OperationState",
-        "value": "BSH.Common.EnumType.OperationState.Inactive",
-        "name": "Betriebszustand",
-        "displayvalue": "Inaktiv"
-      },
-      {
-        "key": "BSH.Common.Status.RemoteControlActive",
-        "value": true,
-        "name": "Fernbedienung"
-      },
-      {
-        "key": "BSH.Common.Status.RemoteControlStartAllowed",
-        "value": true,
-        "name": "Fernstart"
-      }
-    ]
-  }
+    "data": {
+        "status": [
+            {
+                "key": "BSH.Common.Status.DoorState",
+                "value": "BSH.Common.EnumType.DoorState.Open",
+                "name": "Tür",
+                "displayvalue": "Offen"
+            },
+            {
+                "key": "BSH.Common.Status.LocalControlActive",
+                "value": false,
+                "name": "Lokale Bedienung aktiv"
+            },
+            {
+                "key": "BSH.Common.Status.OperationState",
+                "value": "BSH.Common.EnumType.OperationState.Inactive",
+                "name": "Betriebszustand",
+                "displayvalue": "Inaktiv"
+            },
+            {
+                "key": "BSH.Common.Status.RemoteControlActive",
+                "value": true,
+                "name": "Fernbedienung"
+            },
+            {
+                "key": "BSH.Common.Status.RemoteControlStartAllowed",
+                "value": true,
+                "name": "Fernstart"
+            }
+        ]
+    }
 }

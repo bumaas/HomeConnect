@@ -1,33 +1,33 @@
 {
-  "data": {
-    "status": [
-      {
-        "key": "BSH.Common.Status.RemoteControlStartAllowed",
-        "value": true,
-        "name": "Fernstart"
-      },
-      {
-        "key": "BSH.Common.Status.RemoteControlActive",
-        "value": true,
-        "name": "Fernbedienung"
-      },
-      {
-        "key": "BSH.Common.Status.DoorState",
-        "value": "BSH.Common.EnumType.DoorState.Closed",
-        "name": "Tür",
-        "displayvalue": "Geschlossen"
-      },
-      {
-        "key": "BSH.Common.Status.OperationState",
-        "value": "BSH.Common.EnumType.OperationState.Ready",
-        "name": "Betriebszustand",
-        "displayvalue": "Bereit"
-      },
-      {
-        "key": "BSH.Common.Status.InteriorIlluminationActive",
-        "value": true,
-        "name": "Innenbeleuchtung"
-      }
-    ]
-  }
+    "data": {
+        "status": [
+            {
+                "key": "BSH.Common.Status.RemoteControlStartAllowed",
+                "value": true,
+                "name": "Fernstart"
+            },
+            {
+                "key": "BSH.Common.Status.RemoteControlActive",
+                "value": true,
+                "name": "Fernbedienung"
+            },
+            {
+                "key": "BSH.Common.Status.DoorState",
+                "value": "BSH.Common.EnumType.DoorState.Closed",
+                "name": "Tür",
+                "displayvalue": "Geschlossen"
+            },
+            {
+                "key": "BSH.Common.Status.OperationState",
+                "value": "BSH.Common.EnumType.OperationState.Ready",
+                "name": "Betriebszustand",
+                "displayvalue": "Bereit"
+            },
+            {
+                "key": "BSH.Common.Status.InteriorIlluminationActive",
+                "value": true,
+                "name": "Innenbeleuchtung"
+            }
+        ]
+    }
 }
