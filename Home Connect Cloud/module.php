@@ -230,6 +230,14 @@ class HomeConnectCloud extends WebOAuthModule
         if ($this->isRateLimitActive()) {
             return;
         }
+        // A block that has expired but was never lifted: a restart during the block
+        // resets the RateLimit timer, while RateLimitUntil and the IO deactivated by
+        // applyRateLimit persist. Lift it here, otherwise the stream stays dead.
+        if ($this->ReadAttributeInteger('RateLimitUntil') !== 0) {
+            $this->SendDebug('KeepAlive', 'Expired rate limit was not lifted - resetting', 0);
+            $this->ResetRateLimit();
+            return;
+        }
         // A stale keep-alive means the event stream is dead - reconnect regardless of
         // the parent's current status. Gating this behind HasActiveParent() prevented
         // recovery exactly when the parent had dropped to an error state (keep-alives
@@ -273,13 +281,18 @@ class HomeConnectCloud extends WebOAuthModule
         $this->WriteAttributeString('RateError', '');
         $this->WriteAttributeInteger('RateLimitUntil', 0);
         $this->updateRateLimitNotice();
-        $this->SetStatus(IS_ACTIVE);
         $this->SetTimerInterval('RateLimit', 0);
 
         // Limit is over - re-activate the IO (stopped in applyRateLimit) and resume the
         // event stream exactly once, with a freshly fetched access token.
         $this->SetTimerInterval('Reconnect', 0);
         $this->ForceRegisterServerEvents();
+
+        // Only now report IS_ACTIVE: children answer the status change with
+        // HasActiveParent(), which walks up to the IO. Seeing it still inactive they
+        // would go inactive and, ignoring repeated identical status messages, stay so.
+        $this->SendDebug('ResetRateLimit', 'Event stream resumed, instance active', 0);
+        $this->SetStatus(IS_ACTIVE);
     }
 
     public function GetConfigurationForm()
@@ -376,9 +389,10 @@ class HomeConnectCloud extends WebOAuthModule
         }
 
         $this->SendDebug('ReceiveTokenExpired', 'Access token expired on event stream - refreshing token and reconnecting', 0);
-        // Re-register the stream: RegisterServerEvents calls FetchAccessToken(), which
-        // automatically refreshes an expired access token via the refresh token before
-        // re-arming the /events request. No need to wait for the keep-alive watchdog.
+        // The server rejected the cached token, although it may still be valid by its
+        // local expiry (clock skew, revocation). Drop it, so FetchAccessToken() in
+        // RegisterServerEvents fetches a new one instead of re-sending the rejected one.
+        $this->SetBuffer('AccessToken', '');
         $this->ForceRegisterServerEvents();
         return true;
     }

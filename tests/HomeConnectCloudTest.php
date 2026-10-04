@@ -151,14 +151,17 @@ class HomeConnectCloudTest extends TestCase
         $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
         $parent = $this->prepareParentIo($cloudID);
 
-        //Seed a valid access token so the reconnect reuses it instead of hitting OAuth.
+        //A cached access token the server has just rejected. Without a refresh token the
+        //refresh fails before any network access - which proves a new token was requested.
         $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
 
+        ob_start();
         $cloud->ReceiveData('{"error":{"key":"invalid_token","description":"The access token expired"}}');
+        $output = ob_get_clean();
 
         $this->assertFalse($this->invoke($cloud, 'isRateLimitActive'), 'invalid_token must not be treated as a rate limit');
         $this->assertTrue(IPS_GetProperty($parent, 'Active'), 'Stream must be re-registered (IO active) after invalid_token');
-        $this->assertStringContainsString('homeappliances/events', IPS_GetProperty($parent, 'URL'), 'Reconnect must re-arm the /events request');
+        $this->assertStringContainsString('login is missing', $output, 'Reconnect must request a fresh access token');
     }
 
     /**
@@ -313,6 +316,106 @@ class HomeConnectCloudTest extends TestCase
 
         $this->assertSame('', (string) $this->invoke($cloud, 'GetBuffer', 'WatchdogRetries'), 'A keep-alive must reset the watchdog backoff');
         $this->assertSame('', (string) $this->invoke($cloud, 'GetBuffer', 'WatchdogNextRetry'), 'A keep-alive must clear the pending backoff window');
+    }
+
+    /**
+     * Review finding 1: a Symcon restart during a block resets the RateLimit timer to 0
+     * (timers are runtime state), while RateLimitUntil and the deactivated IO persist.
+     * Once the block has expired, the keep-alive watchdog must lift the block and
+     * re-activate the IO - otherwise RegisterServerEvents only reports "IO instance is
+     * not active" and the event stream stays dead until the user intervenes.
+     */
+    public function testWatchdogLiftsExpiredBlockAfterRestart()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
+
+        //State after the restart: block expired, IO still switched off by applyRateLimit,
+        //RateLimit timer not running, keep-alive stale.
+        $this->invoke($cloud, 'WriteAttributeInteger', 'RateLimitUntil', time() - 10);
+        $this->assertFalse(IPS_GetProperty($parent, 'Active'));
+        $this->invoke($cloud, 'SetBuffer', 'KeepAlive', (string) (time() - 120));
+
+        ob_start();
+        $cloud->CheckServerEvents();
+        $output = ob_get_clean();
+
+        $this->assertSame('', $output, 'The watchdog must not end up at "IO instance is not active"');
+        $this->assertSame(0, $this->invoke($cloud, 'ReadAttributeInteger', 'RateLimitUntil'), 'The expired block must be cleared');
+        $this->assertTrue(IPS_GetProperty($parent, 'Active'), 'The IO stopped for the block must be re-activated');
+        $this->assertStringContainsString('homeappliances/events', IPS_GetProperty($parent, 'URL'), 'The event stream must be re-registered');
+    }
+
+    /**
+     * Counterpart to finding 1: an IO the user switched off on purpose (no block pending)
+     * must stay off - the watchdog only re-activates an IO the module stopped itself.
+     */
+    public function testWatchdogLeavesIntentionallyInactiveIoAlone()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
+        $this->invoke($cloud, 'SetBuffer', 'KeepAlive', (string) (time() - 120));
+
+        ob_start();
+        $cloud->CheckServerEvents();
+        ob_end_clean();
+
+        $this->assertFalse(IPS_GetProperty($parent, 'Active'), 'An IO switched off by the user must not be re-activated');
+    }
+
+    /**
+     * Review finding 2: a 401 "invalid_token" from the stream means the server rejected
+     * the cached access token. The reconnect must not re-send that same token (it is
+     * still "valid" by its local expiry) - each such attempt costs a GET /events.
+     */
+    public function testInvalidTokenDropsCachedAccessToken()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+
+        //Locally still valid for an hour, but the server has rejected it.
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'rejected', 'Expires' => time() + 3600]));
+        //Without a refresh token the refresh fails before any network access.
+        $this->invoke($cloud, 'WriteAttributeString', 'Token', '');
+
+        ob_start();
+        $cloud->ReceiveData('{"error":{"key":"invalid_token","description":"The access token expired"}}');
+        ob_end_clean();
+
+        $this->assertStringNotContainsString('Bearer rejected', (string) IPS_GetProperty($parent, 'Headers'), 'The rejected token must not be sent again');
+        $this->assertStringNotContainsString('rejected', (string) $this->invoke($cloud, 'GetBuffer', 'AccessToken'), 'The rejected token must be dropped from the cache');
+    }
+
+    /**
+     * Review finding 3: ResetRateLimit must re-activate the IO before the instance reports
+     * IS_ACTIVE. Children react to that status change with HasActiveParent(), which walks
+     * up to the IO; seeing it still inactive they go inactive and - because of their
+     * LastParentStatus guard - never retry. The stubs deliver no messages, so the order is
+     * checked on the debug trace: the stream registration ('url') must precede the status.
+     */
+    public function testResetRateLimitActivatesIoBeforeStatus()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $this->prepareParentIo($cloudID);
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
+
+        $cloud->ReceiveData(self::RATE_LIMIT_PAYLOAD);
+        //The debug log is not reset between tests - only look at what ResetRateLimit writes.
+        $before = count(IPS\DebugServer::getDebugMessages($cloudID));
+        $cloud->ResetRateLimit();
+
+        $messages = array_column(array_slice(IPS\DebugServer::getDebugMessages($cloudID), $before), 'Message');
+        $registered = array_search('url', $messages, true);
+        $activated = array_search('ResetRateLimit', $messages, true);
+        $this->assertNotFalse($registered, 'ResetRateLimit must re-register the event stream');
+        $this->assertNotFalse($activated, 'ResetRateLimit must trace when the instance becomes active');
+        $this->assertLessThan($activated, $registered, 'The IO must be active before the instance reports IS_ACTIVE');
     }
 
     private function cloud()
