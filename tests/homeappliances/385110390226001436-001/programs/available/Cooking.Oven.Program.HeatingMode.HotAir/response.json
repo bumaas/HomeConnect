@@ -1,0 +1,50 @@
+{
+    "data": {
+        "key": "Cooking.Oven.Program.HeatingMode.HotAir",
+        "name": "4D Heißluft",
+        "options": [
+            {
+                "name": "Temperatur",
+                "key": "Cooking.Oven.Option.SetpointTemperature",
+                "constraints": {
+                    "min": 30,
+                    "liveupdate": true,
+                    "max": 275,
+                    "stepsize": 1,
+                    "default": 180
+                },
+                "unit": "°C",
+                "type": "Double"
+            },
+            {
+                "name": "Dauer anpassen",
+                "key": "BSH.Common.Option.Duration",
+                "constraints": {
+                    "min": 1,
+                    "max": 86400,
+                    "default": 1,
+                    "liveupdate": true
+                },
+                "unit": "seconds",
+                "type": "Int"
+            },
+            {
+                "name": "Startzeit",
+                "key": "BSH.Common.Option.StartInRelative",
+                "constraints": {
+                    "min": 0,
+                    "max": 86340,
+                    "default": 0,
+                    "liveupdate": true
+                },
+                "unit": "seconds",
+                "type": "Int"
+            },
+            {
+                "key": "Cooking.Oven.Option.FastPreHeat",
+                "type": "Boolean",
+                "name": "Schnellaufheizen"
+            }
+        ]
+    }
+}

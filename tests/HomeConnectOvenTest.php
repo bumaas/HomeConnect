@@ -31,6 +31,41 @@ class HomeConnectOvenTest extends TestCase
         parent::setUp();
     }
 
+    /**
+     * Upstream review of PR #20: an option profile that already exists as INTEGER while the
+     * API reports a Double made the variable an INTEGER too (build 30), so 4.5 would be cut
+     * to 4. The lossy direction gets a float profile of its own (".f", as createStates does)
+     * and a float variable. The option is the setpoint of the oven HM778GMB1 (real capture
+     * under tests/homeappliances/385110390226001436-001); only the stale profile is staged.
+     */
+    public function testFloatOptionAgainstIntegerProfileGetsFloatProfile()
+    {
+        $profile = 'HomeConnect.Oven.Option.SetpointTemperature';
+        IPS_CreateVariableProfile($profile, VARIABLETYPE_INTEGER);
+
+        $oven = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
+        $intf = IPS\InstanceManager::getInstanceInterface($oven);
+        $program = json_decode(file_get_contents(__DIR__ . '/homeappliances/385110390226001436-001/programs/available/Cooking.Oven.Program.HeatingMode.HotAir/response.json'), true);
+        $option = $program['data']['options'][0];
+        $this->assertSame('Cooking.Oven.Option.SetpointTemperature', $option['key']);
+        $this->assertSame('Double', $option['type']);
+
+        $create = new ReflectionMethod($intf, 'createVariableFromConstraints');
+        $create->setAccessible(true);
+        $create->invoke($intf, $profile, $option, 'Option', 10);
+
+        $variableID = @IPS_GetObjectIDByIdent('OptionSetpointTemperature', $oven);
+        $this->assertNotFalse($variableID, 'The option variable must be created');
+        $this->assertSame(VARIABLETYPE_FLOAT, IPS_GetVariable($variableID)['VariableType'], 'A Double option must not be cut to an integer');
+        $this->assertSame($profile . '.f', IPS_GetVariable($variableID)['VariableProfile'], 'The float variable gets the float profile');
+        $floatProfile = IPS_GetVariableProfile($profile . '.f');
+        $this->assertSame(VARIABLETYPE_FLOAT, $floatProfile['ProfileType']);
+        $this->assertEquals(30, $floatProfile['MinValue']);
+        $this->assertEquals(275, $floatProfile['MaxValue']);
+        $this->assertSame(' °C', $floatProfile['Suffix']);
+        $this->assertSame(VARIABLETYPE_INTEGER, IPS_GetVariableProfile($profile)['ProfileType'], 'The existing profile is left alone');
+    }
+
     public function testBaseFunctionality()
     {
         $cloudInterface = IPS\InstanceManager::getInstanceInterface(IPS_GetInstanceListByModuleID('{CE76810D-B685-9BE0-CC04-38B204DEAD5E}')[0]);

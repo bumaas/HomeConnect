@@ -1,0 +1,142 @@
+{
+    "data": {
+        "active": {
+            "constraints": {
+                "access": "readWrite"
+            }
+        },
+        "programs": [
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.Microwave.90Watt",
+                "name": "90 Watt"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.Microwave.180Watt",
+                "name": "180 Watt"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.Microwave.360Watt",
+                "name": "360 Watt"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.Microwave.600Watt",
+                "name": "600 Watt"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.Microwave.Max",
+                "name": "Boost"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.HotAir",
+                "name": "4D Heißluft"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.TopBottomHeating",
+                "name": "Ober-/Unterhitze"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.TopBottomHeatingEco",
+                "name": "Sanfte Ober-/Unterhitze"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.HotAirGrilling",
+                "name": "Umluftgrillen"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.PizzaSetting",
+                "name": "Pizzastufe"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.FrozenHeatupSpecial",
+                "name": "coolStart-Funktion"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.IntensiveHeat",
+                "name": "Intensivhitze"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.SlowCook",
+                "name": "Sanftgaren"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.Desiccation",
+                "name": "Dörren"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.BottomHeating",
+                "name": "Unterhitze"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.KeepWarm",
+                "name": "Warmhalten"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.PreheatOvenware",
+                "name": "Geschirr vorwärmen"
+            },
+            {
+                "constraints": {
+                    "execution": "selectandstart"
+                },
+                "key": "Cooking.Oven.Program.HeatingMode.PreHeating",
+                "name": "Vorheizen"
+            }
+        ],
+        "selected": {
+            "constraints": {
+                "access": "readWrite"
+            }
+        }
+    }
+}

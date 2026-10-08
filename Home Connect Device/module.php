@@ -1433,6 +1433,17 @@ class HomeConnectDevice extends IPSModule
                     IPS_CreateVariableProfile($profileName, $variableType);
                 }
                 $existingProfileType = IPS_GetVariableProfile($profileName)['ProfileType'];
+                if ($existingProfileType === VARIABLETYPE_INTEGER && $variableType === VARIABLETYPE_FLOAT) {
+                    // An integer profile would cut the float values (4.5 °C -> 4). Give them a
+                    // float profile of their own, as createStates does, and leave the existing
+                    // profile alone. The other direction is lossless and follows the profile.
+                    $this->SendDebug(__FUNCTION__, sprintf('Profile %s exists as integer; using %s.f for the float values', $profileName, $profileName), 0);
+                    $profileName .= '.f';
+                    if (!IPS_VariableProfileExists($profileName)) {
+                        IPS_CreateVariableProfile($profileName, VARIABLETYPE_FLOAT);
+                    }
+                    $existingProfileType = IPS_GetVariableProfile($profileName)['ProfileType'];
+                }
                 if ($existingProfileType === $variableType) {
                     IPS_SetVariableProfileText($profileName, '', isset($data['unit']) ? ' ' . $data['unit'] : '');
                     $min = isset($constraints['min']) ? $constraints['min'] : 0;
