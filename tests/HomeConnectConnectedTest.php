@@ -166,6 +166,28 @@ class HomeConnectConnectedTest extends TestCase
         $this->assertStringStartsWith('trigger: RetryRefresh,', $traces[0], 'The retry must be traced under its own trigger');
     }
 
+    /**
+     * Follow-up from the review of PR #20: RetryRefresh is a repeating timer. If the cloud
+     * goes inactive while a retry is pending (e.g. a rate-limit block), it kept firing every
+     * 1-30 s until the cloud was active again: no API request, but a script run and a debug
+     * line each time. An inactive parent must stop the timer; the status change back to
+     * IS_ACTIVE starts the initialization again anyway.
+     */
+    public function testInactiveParentStopsPendingRetry()
+    {
+        $device = $this->createDevice(self::OFFLINE_HAID, 'Washer');
+        $intf = IPS\InstanceManager::getInstanceInterface($device);
+        $intf->ReceiveData(json_encode(['Event' => 'CONNECTED', 'Data' => '', 'ID' => self::OFFLINE_HAID]));
+        $this->assertGreaterThan(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'Precondition: a retry is pending');
+
+        $parent = IPS_GetInstance($device)['ConnectionID'];
+        IPS\InstanceManager::setStatus($parent, 201);
+        $intf->MessageSink(0, $parent, IM_CHANGESTATUS, [201]);
+
+        $this->assertLessThanOrEqual(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'The retry must stop while the parent is inactive');
+        $this->assertSame(IS_INACTIVE, IPS_GetInstance($device)['InstanceStatus']);
+    }
+
     private function invoke($object, string $method, ...$args)
     {
         $ref = new ReflectionMethod($object, $method);
