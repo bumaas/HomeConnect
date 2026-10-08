@@ -627,6 +627,9 @@ class HomeConnectDevice extends IPSModule
             return;
         }
 
+        // No parent to refresh from: stop a pending retry, it would fire every 1-30 s for
+        // nothing. The status change back to IS_ACTIVE starts the initialization again.
+        $this->SetTimerInterval('RetryRefresh', 0);
         $this->setInstanceStatus(IS_INACTIVE);
     }
 
