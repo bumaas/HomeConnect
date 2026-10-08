@@ -139,7 +139,7 @@ class HomeConnectDevice extends IPSModule
         $this->RegisterAttributeBoolean('Initialized', false);
 
         // Retries an initialization the refresh throttle had to skip.
-        $this->RegisterTimer('RetryRefresh', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], "RefreshDeviceState", "");');
+        $this->RegisterTimer('RetryRefresh', 0, 'IPS_RequestAction($_IPS[\'TARGET\'], "RetryRefreshDeviceState", "");');
 
         //Common States
         //States
@@ -373,6 +373,12 @@ class HomeConnectDevice extends IPSModule
                 $this->refreshDeviceState($this->needsInitialization(), 'Event:CONNECTED (deferred)');
                 return;
 
+            case 'RetryRefreshDeviceState':
+                // Internal action, triggered by the RetryRefresh timer: repeats an
+                // initialization the refresh throttle had to skip.
+                $this->refreshDeviceState($this->needsInitialization(), 'RetryRefresh');
+                return;
+
             case 'RefreshActiveProgramOptions':
                 // Internal action, triggered by the one-shot timer armed in
                 // updateActiveProgram(). Creates the option variables for a program
@@ -589,8 +595,6 @@ class HomeConnectDevice extends IPSModule
     {
         // DEBUG (rate-limit analysis): record every refresh, its trigger and the chosen path.
         $this->SendDebug(__FUNCTION__, sprintf('trigger: %s, mode: %s, activeParent: %s', $trigger, $initializeDevice ? 'init' : 'valueRefresh', $this->HasActiveParent() ? 'yes' : 'no'), 0);
-        // Any refresh supersedes a pending retry; a throttled init re-arms it below.
-        $this->SetTimerInterval('RetryRefresh', 0);
         if ($this->HasActiveParent() && $this->ReadPropertyString('HaID')) {
             $this->SetSummary($this->ReadPropertyString('HaID'));
             $wait = $this->refreshThrottled();
@@ -599,12 +603,18 @@ class HomeConnectDevice extends IPSModule
                 // keep the instance active. Live STATUS/NOTIFY events still update
                 // values directly (they do not go through this path). A skipped
                 // initialization has no such substitute: retry it after the window.
+                // A throttled value refresh leaves a pending retry alone.
                 $this->SendDebug(__FUNCTION__, sprintf('throttled (trigger: %s)', $trigger), 0);
-                if ($initializeDevice) {
+                if ($initializeDevice || $this->needsInitialization()) {
                     $this->SetTimerInterval('RetryRefresh', $wait * 1000);
                 }
                 $this->setInstanceStatus(IS_ACTIVE);
                 return;
+            }
+            // This refresh runs now and supersedes a pending retry - unless it is a value
+            // refresh and the initialization is still due.
+            if ($initializeDevice || !$this->needsInitialization()) {
+                $this->SetTimerInterval('RetryRefresh', 0);
             }
             if ($initializeDevice) {
                 $this->InitializeDevice();
@@ -1316,11 +1326,12 @@ class HomeConnectDevice extends IPSModule
 
     /**
      * Readable name built from the last key snippet for keys without a known name
-     * (SaltNearlyEmpty -> "Salt Nearly Empty", DelicatesSilk -> "Delicates Silk").
+     * (SaltNearlyEmpty -> "Salt Nearly Empty", Eco50 -> "Eco 50"). Digits form a word of
+     * their own; a capital right after a digit belongs to it (HotAir3D -> "Hot Air 3D").
      */
     private function getReadableName(string $key): string
     {
-        return trim(preg_replace('/(?<=[a-z0-9])(?=[A-Z])/', ' ', $this->getLastSnippet($key)));
+        return trim(preg_replace('/(?<=[a-z])(?=[A-Z0-9])|(?<=[0-9])(?=[A-Z][a-z])/', ' ', $this->getLastSnippet($key)));
     }
 
     private function createAssociations($profileName, $associations)

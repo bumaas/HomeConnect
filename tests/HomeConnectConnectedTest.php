@@ -124,6 +124,48 @@ class HomeConnectConnectedTest extends TestCase
         $this->assertLessThanOrEqual(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'No retry for a value refresh');
     }
 
+    /**
+     * Upstream review of PR #20: refreshDeviceState() cleared the retry timer on every
+     * call, so a throttled value refresh in the same window dropped a pending
+     * initialization retry without re-arming it. The retry must survive.
+     */
+    public function testThrottledValueRefreshKeepsPendingRetry()
+    {
+        $device = $this->createDevice(self::OFFLINE_HAID, 'Washer');
+        $intf = IPS\InstanceManager::getInstanceInterface($device);
+        $intf->ReceiveData(json_encode(['Event' => 'CONNECTED', 'Data' => '', 'ID' => self::OFFLINE_HAID]));
+        $this->assertGreaterThan(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'Precondition: a retry is pending');
+
+        //A value refresh within the throttle window (e.g. a parent status flap).
+        $this->invoke($intf, 'refreshDeviceState', false, 'test');
+
+        $this->assertGreaterThan(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'The pending retry must not be lost');
+    }
+
+    /**
+     * Upstream review of PR #20: the retry ran through the CONNECTED action and showed up
+     * in the debug log as "Event:CONNECTED (deferred)". It must name its own trigger.
+     */
+    public function testRetryRunsUnderItsOwnLabel()
+    {
+        $device = $this->createDevice(self::OFFLINE_HAID, 'Washer');
+        $intf = IPS\InstanceManager::getInstanceInterface($device);
+        $intf->ReceiveData(json_encode(['Event' => 'CONNECTED', 'Data' => '', 'ID' => self::OFFLINE_HAID]));
+
+        $before = count(IPS\DebugServer::getDebugMessages($device));
+        //What the RetryRefresh timer runs.
+        $intf->RequestAction('RetryRefreshDeviceState', '');
+
+        $traces = [];
+        foreach (array_slice(IPS\DebugServer::getDebugMessages($device), $before) as $message) {
+            if ($message['Message'] === 'refreshDeviceState' && strpos($message['Data'], 'trigger: ') === 0) {
+                $traces[] = $message['Data'];
+            }
+        }
+        $this->assertCount(1, $traces, 'The retry runs exactly one refresh');
+        $this->assertStringStartsWith('trigger: RetryRefresh,', $traces[0], 'The retry must be traced under its own trigger');
+    }
+
     private function invoke($object, string $method, ...$args)
     {
         $ref = new ReflectionMethod($object, $method);

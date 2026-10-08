@@ -278,15 +278,11 @@ class HomeConnectCloud extends WebOAuthModule
         if (!$this->connectEventStream(true, false)) {
             return;
         }
-        $this->WriteAttributeString('RateError', '');
-        $this->WriteAttributeInteger('RateLimitUntil', 0);
-        $this->updateRateLimitNotice();
-
-        // Only now report IS_ACTIVE: children answer the status change with
-        // HasActiveParent(), which walks up to the IO. Seeing it still inactive they
-        // would go inactive and, ignoring repeated identical status messages, stay so.
-        $this->SendDebug('ResetRateLimit', 'Event stream resumed, instance active', 0);
-        $this->SetStatus(IS_ACTIVE);
+        // An expired block is already lifted by connectEventStream; a block that is still
+        // running (the request went through anyway) is lifted here.
+        if ($this->ReadAttributeInteger('RateLimitUntil') !== 0) {
+            $this->liftRateLimit();
+        }
     }
 
     public function GetConfigurationForm()
@@ -385,7 +381,7 @@ class HomeConnectCloud extends WebOAuthModule
         $this->SendDebug('ReceiveTokenExpired', 'Access token expired on event stream - refreshing token and reconnecting', 0);
         // The server rejected the cached token, although it may still be valid by its
         // local expiry (clock skew, revocation). Drop it, so FetchAccessToken() in
-        // RegisterServerEvents fetches a new one instead of re-sending the rejected one.
+        // connectEventStream fetches a new one instead of re-sending the rejected one.
         $this->SetBuffer('AccessToken', '');
         $this->connectEventStream(true, false);
         return true;
@@ -624,6 +620,21 @@ class HomeConnectCloud extends WebOAuthModule
         return $this->ReadAttributeInteger('RateLimitUntil') > time();
     }
 
+    /**
+     * Clears the block state and reports the instance active again. Call it only once
+     * the event stream runs: children answer the status change with HasActiveParent(),
+     * which walks up to the IO. Seeing it still inactive they would go inactive and,
+     * ignoring repeated identical status messages, stay so.
+     */
+    private function liftRateLimit(): void
+    {
+        $this->WriteAttributeString('RateError', '');
+        $this->WriteAttributeInteger('RateLimitUntil', 0);
+        $this->updateRateLimitNotice();
+        $this->SendDebug('ResetRateLimit', 'Event stream resumed, instance active', 0);
+        $this->SetStatus(IS_ACTIVE);
+    }
+
     private function updateRateLimitNotice(): void
     {
         $rateError = $this->ReadAttributeString('RateError');
@@ -771,6 +782,15 @@ class HomeConnectCloud extends WebOAuthModule
         $this->SetBuffer('KeepAlive', time());
 
         $this->SetTimerInterval('Reconnect', 0);
+
+        // A block that expired while the stream could not be resumed (no token) is still
+        // pending. Now that the stream runs again, lift it - whoever registered it: the
+        // reset timer, the watchdog, a new login (ProcessOAuthData) or the 401 recovery.
+        // Otherwise the instance would stay at the rate-limited status with a running
+        // stream until some REST request happens to succeed.
+        if ($this->ReadAttributeInteger('RateLimitUntil') !== 0 && !$this->isRateLimitActive()) {
+            $this->liftRateLimit();
+        }
         return true;
     }
 

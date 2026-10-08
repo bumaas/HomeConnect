@@ -97,6 +97,22 @@ class HomeConnectWasherDryerTest extends TestCase
         $this->assertSame('Delicates Silk', $this->associations()['LaundryCare.WasherDryer.Program.DelicatesSilk'] ?? null);
     }
 
+    /**
+     * Upstream review of PR #20: a digit followed by a capital split oddly, "HotAir3D"
+     * became "Hot Air3 D". Digits form their own word, a capital after a digit does not.
+     */
+    public function testReadableNameKeepsDigitGroupsTogether()
+    {
+        $intf = IPS\InstanceManager::getInstanceInterface($this->createWasherDryer());
+        $readableName = new ReflectionMethod($intf, 'getReadableName');
+        $readableName->setAccessible(true);
+
+        //Keys of the washer WAV28G43 and the dishwasher (tests/homeappliances), example from the review.
+        $this->assertSame('IDos 1 Base Level', $readableName->invoke($intf, 'LaundryCare.Washer.Setting.IDos1BaseLevel'));
+        $this->assertSame('Eco 50', $readableName->invoke($intf, 'Dishcare.Dishwasher.Program.Eco50'));
+        $this->assertSame('Hot Air 3D', $readableName->invoke($intf, 'Cooking.Oven.Program.HeatingMode.HotAir3D'));
+    }
+
     private function createWasherDryer()
     {
         $washerDryer = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');

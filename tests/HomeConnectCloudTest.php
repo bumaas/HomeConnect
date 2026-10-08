@@ -13,6 +13,7 @@ use PHPUnit\Framework\TestCase;
 class HomeConnectCloudTest extends TestCase
 {
     private const CLOUD_GUID = '{CE76810D-B685-9BE0-CC04-38B204DEAD5E}';
+    private const STATUS_RATE_LIMITED = 201;
 
     //A 429 as it arrives through the SSE event stream (see cbeham's dump.txt).
     private const RATE_LIMIT_PAYLOAD = '{"error":{"key":"429","description":"The rate limit \"1000 calls in 1 day\" was reached. Requests are blocked during the remaining period of 18113 seconds."}}';
@@ -494,6 +495,56 @@ class HomeConnectCloudTest extends TestCase
         $this->assertNotFalse($registered, 'ResetRateLimit must re-register the event stream');
         $this->assertNotFalse($activated, 'ResetRateLimit must trace when the instance becomes active');
         $this->assertLessThan($activated, $registered, 'The IO must be active before the instance reports IS_ACTIVE');
+    }
+
+    /**
+     * Upstream review of PR #20: since build 30 an expired block stays pending when the
+     * stream cannot be resumed (no token). When the user then registers again,
+     * ProcessOAuthData only re-registers the stream - nothing cleared the block, so the
+     * stream ran while the cloud stayed at 201 and the devices stayed inactive. Any
+     * successful stream registration must lift an expired block.
+     */
+    public function testReRegistrationLiftsPendingBlock()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+
+        $cloud->ReceiveData(self::RATE_LIMIT_PAYLOAD);
+        //The block expired, but the reset could not fetch a token (login revoked).
+        $this->invoke($cloud, 'WriteAttributeInteger', 'RateLimitUntil', time() - 1);
+        ob_start();
+        $cloud->ResetRateLimit();
+        ob_end_clean();
+        $this->assertSame(self::STATUS_RATE_LIMITED, IPS_GetInstance($cloudID)['InstanceStatus'], 'Precondition: the block is still pending');
+
+        //The user registers again: a token is available, ProcessOAuthData re-registers.
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
+        $cloud->ForceRegisterServerEvents();
+
+        $this->assertTrue(IPS_GetProperty($parent, 'Active'), 'The event stream runs again');
+        $this->assertSame(0, $this->invoke($cloud, 'ReadAttributeInteger', 'RateLimitUntil'), 'The expired block must be lifted with the stream');
+        $this->assertSame('', $this->invoke($cloud, 'ReadAttributeString', 'RateError'), 'The notice must be cleared');
+        $this->assertSame(IS_ACTIVE, IPS_GetInstance($cloudID)['InstanceStatus'], 'The instance must leave the rate-limited status');
+    }
+
+    /**
+     * Counterpart: a block that is still running is not lifted by a registration - the
+     * registration is deferred instead (see testRegisterServerEventsDefersWhileRateLimited).
+     */
+    public function testReRegistrationKeepsRunningBlock()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+        $this->invoke($cloud, 'SetBuffer', 'AccessToken', json_encode(['Token' => 'test', 'Expires' => time() + 3600]));
+
+        $cloud->ReceiveData(self::RATE_LIMIT_PAYLOAD);
+        $cloud->ForceRegisterServerEvents();
+
+        $this->assertFalse(IPS_GetProperty($parent, 'Active'), 'The IO stays off during the block');
+        $this->assertNotSame(0, $this->invoke($cloud, 'ReadAttributeInteger', 'RateLimitUntil'), 'A running block is kept');
+        $this->assertSame(self::STATUS_RATE_LIMITED, IPS_GetInstance($cloudID)['InstanceStatus']);
     }
 
     private function cloud()
