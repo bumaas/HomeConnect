@@ -561,10 +561,6 @@ class HomeConnectCloudTest extends TestCase
     private function prepareParentIo(int $cloudID): int
     {
         $parent = IPS_GetInstance($cloudID)['ConnectionID'];
-        $module = IPS\InstanceManager::getInstanceInterface($parent);
-        $this->invoke($module, 'RegisterPropertyBoolean', 'Active', false);
-        $this->invoke($module, 'RegisterPropertyString', 'URL', '');
-        $this->invoke($module, 'RegisterPropertyString', 'Headers', '');
         return $parent;
     }
 

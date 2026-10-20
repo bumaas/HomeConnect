@@ -99,7 +99,11 @@ class HomeConnectConfiguratorTest extends TestCase
     private function createDevice(int $cloudID, string $haID): int
     {
         $device = IPS_CreateInstance(self::DEVICE_GUID);
-        IPS\InstanceManager::connectInstance($device, $cloudID);
+        //ConnectParent() already connected the device to the first cloud
+        if (IPS_GetInstance($device)['ConnectionID'] !== $cloudID) {
+            IPS_DisconnectInstance($device);
+            IPS_ConnectInstance($device, $cloudID);
+        }
         //Parent not active: the device does not try to reach the (stubbed) cloud.
         IPS\InstanceManager::setStatus($cloudID, IS_INACTIVE);
         IPS_SetProperty($device, 'HaID', $haID);
