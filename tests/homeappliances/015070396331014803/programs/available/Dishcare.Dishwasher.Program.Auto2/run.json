@@ -1,0 +1,26 @@
+{
+    "data": {
+        "key": "Dishcare.Dishwasher.Program.Auto2",
+        "name": "Auto 45-65°",
+        "options": [
+            {
+                "key": "Dishcare.Dishwasher.Option.VarioSpeedPlus",
+                "type": "Boolean",
+                "constraints": {
+                    "default": false,
+                    "liveupdate": true
+                },
+                "name": "VarioSpeedPlus"
+            },
+            {
+                "key": "Dishcare.Dishwasher.Option.SilenceOnDemand",
+                "type": "Boolean",
+                "constraints": {
+                    "default": false,
+                    "liveupdate": true
+                },
+                "name": "Jetzt Leise"
+            }
+        ]
+    }
+}

@@ -1,0 +1,28 @@
+{
+    "data": {
+        "key": "Dishcare.Dishwasher.Program.Auto2",
+        "name": "Auto 45-65°",
+        "options": [
+            {
+                "name": "Startzeit",
+                "key": "BSH.Common.Option.StartInRelative",
+                "constraints": {
+                    "min": 0,
+                    "max": 86400,
+                    "liveupdate": true
+                },
+                "unit": "seconds",
+                "type": "Int"
+            },
+            {
+                "key": "Dishcare.Dishwasher.Option.VarioSpeedPlus",
+                "type": "Boolean",
+                "constraints": {
+                    "default": false,
+                    "liveupdate": true
+                },
+                "name": "VarioSpeedPlus"
+            }
+        ]
+    }
+}
