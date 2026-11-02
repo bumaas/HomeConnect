@@ -283,7 +283,14 @@ class HomeConnectDevice extends IPSModule
                     if ($matches) {
                         switch ($matches['type']) {
                             case 'Status':
+                                $readyAgain = $this->isReturnToReady($item);
                                 $this->createStates(['data' => ['status' => [$item]]]);
+                                if ($readyAgain) {
+                                    // The running program may have reduced the offered options
+                                    // (programs/available depends on the operation state).
+                                    // Same deferred refresh as for a SelectedProgram event.
+                                    $this->RegisterOnceTimer('RefreshSelectedProgram', 'IPS_RequestAction($_IPS[\'TARGET\'], "RefreshSelectedProgram", "");');
+                                }
                                 break;
 
                             default:
@@ -492,6 +499,11 @@ class HomeConnectDevice extends IPSModule
                     } else {
                         $applyValue = true;
                     }
+                } elseif (strpos($Ident, 'Option') === 0 && @IPS_GetObjectIDByIdent($Ident, $this->InstanceID)) {
+                    // A hidden option is not offered by the current program. Dropping the
+                    // value silently made a start script believe the start time was set.
+                    echo $this->Translate('This option is not available for the current program');
+                    return;
                 }
 
                 $availableSettings = json_decode($this->ReadAttributeString('Settings'), true);
@@ -846,6 +858,25 @@ class HomeConnectDevice extends IPSModule
         return $data;
     }
 
+    /**
+     * True for an OperationState status item that brings the appliance back to Ready
+     * from another state. Ovens and hoods keep their program selection locally, and a
+     * device without a selected program has nothing to refresh.
+     */
+    private function isReturnToReady(array $item)
+    {
+        if ($item['key'] != 'BSH.Common.Status.OperationState' || $item['value'] != 'BSH.Common.EnumType.OperationState.Ready') {
+            return false;
+        }
+        if (in_array($this->ReadPropertyString('DeviceType'), ['Oven', 'Hood'])) {
+            return false;
+        }
+        if (!@IPS_GetObjectIDByIdent('OperationState', $this->InstanceID) || !@IPS_GetObjectIDByIdent('SelectedProgram', $this->InstanceID)) {
+            return false;
+        }
+        return $this->GetValue('OperationState') != 'BSH.Common.EnumType.OperationState.Ready' && $this->GetValue('SelectedProgram') != '';
+    }
+
     private function useStartInRelativeStartCommand()
     {
         return in_array($this->ReadPropertyString('DeviceType'), self::START_IN_RELATIVE_DEVICES);
@@ -861,8 +892,11 @@ class HomeConnectDevice extends IPSModule
      * @param bool $clearSelectionOnFailure Bei fehlenden Programmdaten die Programmauswahl
      *                                      zurücksetzen (Standard, Selected-Program-Pfad) oder
      *                                      unverändert lassen (Active-Program-Pfad).
+     * @param bool $hideMissing Optionen, die das Programm nicht nennt, verstecken (Standard,
+     *                          Selected-Program-Pfad) oder nur fehlende einblenden
+     *                          (Active-Program-Pfad).
      */
-    private function updateOptionVariables($program, $clearSelectionOnFailure = true)
+    private function updateOptionVariables($program, $clearSelectionOnFailure = true, $hideMissing = true)
     {
         $rawOptions = $this->resolveProgramData($program);
 
@@ -902,7 +936,10 @@ class HomeConnectDevice extends IPSModule
             }
         }
         foreach ($optionVariables as $ident => $variableID) {
-            IPS_SetHidden($variableID, !in_array($ident, $availableOptions));
+            $available = in_array($ident, $availableOptions);
+            if ($available || $hideMissing) {
+                IPS_SetHidden($variableID, !$available);
+            }
         }
 
         $this->syncUseDurationVariable(in_array('OptionDuration', $availableOptions), $position);
@@ -1119,7 +1156,11 @@ class HomeConnectDevice extends IPSModule
         if (!is_string($key) || $key == '') {
             return;
         }
-        $this->updateOptionVariables($key, false);
+        // Only add options here, never hide: the appliance answers programs/available
+        // depending on its operation state. While running, a dishwasher lists neither
+        // StartInRelative nor HygienePlus, and hiding them dropped the start time of
+        // the next start (nuc, 02.11.2026).
+        $this->updateOptionVariables($key, false, false);
         $pending = json_decode($this->GetBuffer('PendingOptionValues'), true);
         $this->SetBuffer('PendingOptionValues', '');
         if (!is_array($pending)) {
