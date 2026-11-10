@@ -640,9 +640,25 @@ class HomeConnectDevice extends IPSModule
         }
 
         // No parent to refresh from: stop a pending retry, it would fire every 1-30 s for
-        // nothing. The status change back to IS_ACTIVE starts the initialization again.
-        $this->SetTimerInterval('RetryRefresh', 0);
+        // nothing. The parent's status change back to IS_ACTIVE starts the initialization
+        // again. That only holds while the parent itself is inactive: HasActiveParent()
+        // also fails while just the event-stream IO above it is down (stream dropped,
+        // reconnecting). The cloud stays IS_ACTIVE then, no status change follows, and the
+        // retry is the only thing left to run the initialization once the IO is back.
+        if ($this->ReadPropertyString('HaID') == '' || !$this->parentIsActive()) {
+            $this->SetTimerInterval('RetryRefresh', 0);
+        }
         $this->setInstanceStatus(IS_INACTIVE);
+    }
+
+    /**
+     * Status of the parent instance itself. HasActiveParent() checks the whole chain up
+     * to the IO, but only a status change of the parent itself reaches MessageSink.
+     */
+    private function parentIsActive(): bool
+    {
+        $parentID = IPS_GetInstance($this->InstanceID)['ConnectionID'];
+        return IPS_InstanceExists($parentID) && IPS_GetInstance($parentID)['InstanceStatus'] == IS_ACTIVE;
     }
 
     /**
@@ -942,7 +958,12 @@ class HomeConnectDevice extends IPSModule
             }
         }
 
-        $this->syncUseDurationVariable(in_array('OptionDuration', $availableOptions), $position);
+        // The duration switch follows its option: without $hideMissing it is shown (or
+        // created), but an existing one is never hidden.
+        $durationAvailable = in_array('OptionDuration', $availableOptions);
+        if ($durationAvailable || $hideMissing || !@IPS_GetObjectIDByIdent('UseDuration', $this->InstanceID)) {
+            $this->syncUseDurationVariable($durationAvailable, $position);
+        }
         $position++;
         $this->ensureControlVariable($position);
     }
