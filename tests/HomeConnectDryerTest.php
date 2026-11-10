@@ -91,10 +91,11 @@ class HomeConnectDryerTest extends TestCase
      */
     public function testActiveProgramDoesNotHideUseDuration()
     {
-        $cloudInterface = IPS\InstanceManager::getInstanceInterface($this->CloudID);
-        $cloudInterface->selectedProgram = 'TimeCold';
         $dryer = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
-        IPS_ConnectInstance($dryer, $this->ConfiguratorID);
+        //ConnectParent() already connected the dryer to a cloud
+        $cloud = IPS_GetInstance($dryer)['ConnectionID'];
+        IPS\InstanceManager::getInstanceInterface($cloud)->selectedProgram = 'TimeCold';
+        IPS\InstanceManager::setStatus($cloud, IS_ACTIVE);
         IPS_SetProperty($dryer, 'HaID', 'BOSCH-WTX87E90-68A40E44C6B9');
         IPS_SetProperty($dryer, 'DeviceType', 'Dryer');
         IPS_ApplyChanges($dryer);
