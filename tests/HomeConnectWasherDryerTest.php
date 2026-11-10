@@ -36,8 +36,8 @@ class HomeConnectWasherDryerTest extends TestCase
         //Register our library we need for testing
         IPS\ModuleLoader::loadLibrary(__DIR__ . '/../library.json');
         $this->ConfiguratorID = IPS_CreateInstance('{CA0E667D-8F28-8DF1-2750-5CF587ECA85A}');
-        $this->CloudID = IPS_CreateInstance('{CE76810D-B685-9BE0-CC04-38B204DEAD5E}');
-        IPS_ConnectInstance($this->ConfiguratorID, $this->CloudID);
+        //ConnectParent() of the configurator already created and connected the cloud
+        $this->CloudID = IPS_GetInstance($this->ConfiguratorID)['ConnectionID'];
         IPS\InstanceManager::setStatus($this->ConfiguratorID, 102);
         IPS\InstanceManager::setStatus($this->CloudID, 102);
 
@@ -116,7 +116,6 @@ class HomeConnectWasherDryerTest extends TestCase
     private function createWasherDryer()
     {
         $washerDryer = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
-        IPS_ConnectInstance($washerDryer, $this->ConfiguratorID);
         IPS_SetProperty($washerDryer, 'HaID', self::HA_ID);
         IPS_SetProperty($washerDryer, 'DeviceType', 'WasherDryer');
         IPS_ApplyChanges($washerDryer);

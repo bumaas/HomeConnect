@@ -57,8 +57,8 @@ class HomeConnectDryerTest extends TestCase
         //Register our library we need for testing
         IPS\ModuleLoader::loadLibrary(__DIR__ . '/../library.json');
         $this->ConfiguratorID = IPS_CreateInstance('{CA0E667D-8F28-8DF1-2750-5CF587ECA85A}');
-        $this->CloudID = IPS_CreateInstance('{CE76810D-B685-9BE0-CC04-38B204DEAD5E}');
-        IPS_ConnectInstance($this->ConfiguratorID, $this->CloudID);
+        //ConnectParent() of the configurator already created and connected the cloud
+        $this->CloudID = IPS_GetInstance($this->ConfiguratorID)['ConnectionID'];
         IPS\InstanceManager::setStatus($this->ConfiguratorID, 102);
         IPS\InstanceManager::setStatus($this->CloudID, 102);
 
@@ -70,10 +70,8 @@ class HomeConnectDryerTest extends TestCase
         $cloudInterface = IPS\InstanceManager::getInstanceInterface($this->CloudID);
         $cloudInterface->selectedProgram = 'Cotton';
         $dryer = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
-        IPS_ConnectInstance($dryer, $this->ConfiguratorID);
         $this->assertTrue(true);
         $dryer = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
-        IPS_ConnectInstance($dryer, $this->ConfiguratorID);
         IPS_SetProperty($dryer, 'HaID', 'BOSCH-WTX87E90-68A40E44C6B9');
         IPS_SetProperty($dryer, 'DeviceType', 'Dryer');
         IPS_ApplyChanges($dryer);
