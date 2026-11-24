@@ -189,6 +189,25 @@ class HomeConnectConnectedTest extends TestCase
     }
 
     /**
+     * Since build 36 the cloud reports a rate-limit block as IS_STANDBY instead of an error.
+     * For the devices that is still an inactive parent: no retry, instance inactive.
+     */
+    public function testStandbyParentStopsPendingRetry()
+    {
+        $device = $this->createDevice(self::OFFLINE_HAID, 'Washer');
+        $intf = IPS\InstanceManager::getInstanceInterface($device);
+        $intf->ReceiveData(json_encode(['Event' => 'CONNECTED', 'Data' => '', 'ID' => self::OFFLINE_HAID]));
+        $this->assertGreaterThan(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'Precondition: a retry is pending');
+
+        $parent = IPS_GetInstance($device)['ConnectionID'];
+        IPS\InstanceManager::setStatus($parent, IS_STANDBY);
+        $intf->MessageSink(0, $parent, IM_CHANGESTATUS, [IS_STANDBY]);
+
+        $this->assertLessThanOrEqual(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'The retry must stop while the parent is in standby');
+        $this->assertSame(IS_INACTIVE, IPS_GetInstance($device)['InstanceStatus']);
+    }
+
+    /**
      * Review of PR #22: HasActiveParent() checks the whole chain up to the event-stream IO.
      * While only the IO is down (stream dropped, reconnecting) the cloud stays IS_ACTIVE, so
      * no status change follows that would start the initialization again. Stopping the retry

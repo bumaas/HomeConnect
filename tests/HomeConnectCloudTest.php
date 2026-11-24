@@ -13,7 +13,9 @@ use PHPUnit\Framework\TestCase;
 class HomeConnectCloudTest extends TestCase
 {
     private const CLOUD_GUID = '{CE76810D-B685-9BE0-CC04-38B204DEAD5E}';
-    private const STATUS_RATE_LIMITED = 201;
+    //IS_STANDBY: a block is no error. An error status (>= IS_EBASE) made Event Control
+    //"reconnect" the cloud every 1-32 minutes for the whole block (WilliDerTiger, #596).
+    private const STATUS_RATE_LIMITED = IS_STANDBY;
 
     //A 429 as it arrives through the SSE event stream (see cbeham's dump.txt).
     private const RATE_LIMIT_PAYLOAD = '{"error":{"key":"429","description":"The rate limit \"1000 calls in 1 day\" was reached. Requests are blocked during the remaining period of 18113 seconds."}}';
@@ -114,8 +116,32 @@ class HomeConnectCloudTest extends TestCase
         $cloud->ReceiveData(self::RATE_LIMIT_PAYLOAD);
 
         $this->assertFalse(IPS_GetProperty($parent, 'Active'), 'Event-stream IO must be deactivated while blocked');
-        //201 == STATUS_RATE_LIMITED (>= IS_EBASE), so children go inactive during the block.
-        $this->assertSame(201, IPS_GetInstance($cloudID)['InstanceStatus'], 'Instance must report the rate-limit status, not active');
+        //Not IS_ACTIVE, so children go inactive during the block.
+        $this->assertSame(self::STATUS_RATE_LIMITED, IPS_GetInstance($cloudID)['InstanceStatus'], 'Instance must report the rate-limit status, not active');
+    }
+
+    /**
+     * WilliDerTiger (#594/#596): during a block Event Control saved the cloud instance
+     * ("Einstellungen gespeichert" + "Wiederverbinden [Home Connect Cloud] erfolgreich")
+     * 33 times a day, because the block status was an error status. Saving the instance
+     * during a block must leave everything as it is: standby, IO off, block pending.
+     */
+    public function testApplyChangesDuringBlockKeepsStandby()
+    {
+        $cloudID = IPS_GetInstanceListByModuleID(self::CLOUD_GUID)[0];
+        $cloud = IPS\InstanceManager::getInstanceInterface($cloudID);
+        $parent = $this->prepareParentIo($cloudID);
+        IPS_SetProperty($parent, 'Active', true);
+        IPS_ApplyChanges($parent);
+
+        $cloud->ReceiveData(self::RATE_LIMIT_PAYLOAD);
+        IPS_ApplyChanges($cloudID);
+
+        $status = IPS_GetInstance($cloudID)['InstanceStatus'];
+        $this->assertSame(IS_STANDBY, $status, 'A block is reported as standby');
+        $this->assertLessThan(IS_EBASE, $status, 'A block must not be an error status, Event Control would keep reconnecting it');
+        $this->assertFalse(IPS_GetProperty($parent, 'Active'), 'Saving must not restart the event stream during the block');
+        $this->assertNotSame(0, $this->invoke($cloud, 'ReadAttributeInteger', 'RateLimitUntil'), 'The block stays pending');
     }
 
     /**
