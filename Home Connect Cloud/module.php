@@ -15,10 +15,12 @@ class HomeConnectCloud extends WebOAuthModule
     //Real
     public const HOME_CONNECT_BASE = 'https://api.home-connect.com/api/';
 
-    // Custom instance status shown while the Home Connect request quota is exhausted.
-    // A code >= IS_EBASE (200) marks the instance as not usable, so child devices go
-    // inactive for the duration of the block instead of pretending to be active.
-    private const STATUS_RATE_LIMITED = 201;
+    // Instance status shown while the Home Connect request quota is exhausted: IS_STANDBY.
+    // Any status other than IS_ACTIVE sends the child devices inactive for the block. An
+    // error status (>= IS_EBASE) would also make Event Control "reconnect" the instance
+    // every 1-32 minutes, which cannot end a block. Kernels without IS_STANDBY keep the
+    // former custom error status.
+    private const STATUS_RATE_LIMITED_LEGACY = 201;
     private $oauthIdentifer = 'home_connect';
 
     private $oauthServer = 'oauth.ipmagic.de';
@@ -710,9 +712,15 @@ class HomeConnectCloud extends WebOAuthModule
         $this->stopEventStream();
 
         // Reflect the block honestly instead of forcing IS_ACTIVE.
-        if ($this->GetStatus() != self::STATUS_RATE_LIMITED) {
-            $this->SetStatus(self::STATUS_RATE_LIMITED);
+        $status = $this->rateLimitStatus();
+        if ($this->GetStatus() != $status) {
+            $this->SetStatus($status);
         }
+    }
+
+    private function rateLimitStatus(): int
+    {
+        return defined('IS_STANDBY') ? IS_STANDBY : self::STATUS_RATE_LIMITED_LEGACY;
     }
 
     /**
