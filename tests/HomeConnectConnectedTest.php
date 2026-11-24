@@ -188,6 +188,30 @@ class HomeConnectConnectedTest extends TestCase
         $this->assertSame(IS_INACTIVE, IPS_GetInstance($device)['InstanceStatus']);
     }
 
+    /**
+     * Review of PR #22: HasActiveParent() checks the whole chain up to the event-stream IO.
+     * While only the IO is down (stream dropped, reconnecting) the cloud stays IS_ACTIVE, so
+     * no status change follows that would start the initialization again. Stopping the retry
+     * there left the instance without its variables once the IO was back; it must keep running.
+     */
+    public function testInactiveIoKeepsPendingRetry()
+    {
+        $device = $this->createDevice(self::OFFLINE_HAID, 'Washer');
+        $intf = IPS\InstanceManager::getInstanceInterface($device);
+        $intf->ReceiveData(json_encode(['Event' => 'CONNECTED', 'Data' => '', 'ID' => self::OFFLINE_HAID]));
+        $this->assertGreaterThan(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'Precondition: a retry is pending');
+
+        //The event stream drops: the IO reports an error, the cloud itself stays active.
+        $cloud = IPS_GetInstance($device)['ConnectionID'];
+        IPS\InstanceManager::setStatus(IPS_GetInstance($cloud)['ConnectionID'], IS_EBASE);
+        //What the RetryRefresh timer runs.
+        $intf->RequestAction('RetryRefreshDeviceState', '');
+
+        $this->assertSame(IS_ACTIVE, IPS_GetInstance($cloud)['InstanceStatus'], 'Precondition: the cloud does not follow its IO');
+        $this->assertSame(IS_INACTIVE, IPS_GetInstance($device)['InstanceStatus']);
+        $this->assertGreaterThan(0, $this->invoke($intf, 'GetTimerInterval', 'RetryRefresh'), 'No status change of the cloud will follow, the retry must stay');
+    }
+
     private function invoke($object, string $method, ...$args)
     {
         $ref = new ReflectionMethod($object, $method);

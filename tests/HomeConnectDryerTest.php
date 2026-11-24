@@ -81,6 +81,38 @@ class HomeConnectDryerTest extends TestCase
         $this->assertEquals(self::TIME_COLD, $this->getChildrenValues($dryer));
     }
 
+    /**
+     * Review of PR #22: since build 35 the active-program path only adds options, but it
+     * still hid and disabled the "Use duration option" switch when the active program does
+     * not list Duration - next to a Duration option that stays visible. Cotton (no Duration)
+     * stands in for a running program that reports a reduced option list.
+     */
+    public function testActiveProgramDoesNotHideUseDuration()
+    {
+        $dryer = IPS_CreateInstance('{F29DF312-A62E-9989-1F1A-0D1E1D171AD3}');
+        //ConnectParent() already connected the dryer to a cloud
+        $cloud = IPS_GetInstance($dryer)['ConnectionID'];
+        IPS\InstanceManager::getInstanceInterface($cloud)->selectedProgram = 'TimeCold';
+        IPS\InstanceManager::setStatus($cloud, IS_ACTIVE);
+        IPS_SetProperty($dryer, 'HaID', 'BOSCH-WTX87E90-68A40E44C6B9');
+        IPS_SetProperty($dryer, 'DeviceType', 'Dryer');
+        IPS_ApplyChanges($dryer);
+        $intf = IPS\InstanceManager::getInstanceInterface($dryer);
+        $this->assertEquals(self::TIME_COLD, $this->getChildrenValues($dryer), 'Precondition: TimeCold offers Duration and its switch');
+
+        $intf->ReceiveData(json_encode([
+            'Event' => 'NOTIFY',
+            'Data'  => json_encode(['items' => [['handling' => 'none', 'key' => 'BSH.Common.Root.ActiveProgram', 'value' => 'LaundryCare.Dryer.Program.Cotton', 'level' => 'hint']], 'haId' => 'BOSCH-WTX87E90-68A40E44C6B9']),
+            'ID'    => 'BOSCH-WTX87E90-68A40E44C6B9'
+        ]));
+
+        $this->assertFalse(IPS_GetObject(IPS_GetObjectIDByIdent('OptionDryingTarget', $dryer))['ObjectIsHidden'], 'Precondition: the active program added its option');
+        $this->assertFalse(IPS_GetObject(IPS_GetObjectIDByIdent('OptionDuration', $dryer))['ObjectIsHidden'], 'Precondition: the active program does not hide options');
+        $useDuration = IPS_GetObject(IPS_GetObjectIDByIdent('UseDuration', $dryer));
+        $this->assertFalse($useDuration['ObjectIsHidden'], 'The duration switch must stay visible with its option');
+        $this->assertFalse($useDuration['ObjectIsDisabled'], 'The duration switch must stay operable with its option');
+    }
+
     private function displayChildrenValues($id)
     {
         $children = IPS_GetChildrenIDs($id);

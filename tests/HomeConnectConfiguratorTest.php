@@ -55,6 +55,47 @@ class HomeConnectConfiguratorTest extends TestCase
         $this->assertNotContains($foreignDevice, $listed, 'A device of another cloud must not be listed');
     }
 
+    /**
+     * Module Store review: the configurator must filter by the instances at its own
+     * splitter. A device without a cloud is not at it.
+     */
+    public function testExistingRowsSkipDeviceWithoutCloud()
+    {
+        $ownCloud = IPS_GetInstance($this->configuratorID)['ConnectionID'];
+        $device = $this->createDevice($ownCloud, 'ORPHAN-DEVICE');
+        IPS_DisconnectInstance($device);
+
+        IPS\InstanceManager::setStatus($ownCloud, IS_INACTIVE);
+        $form = json_decode(IPS\InstanceManager::getInstanceInterface($this->configuratorID)->GetConfigurationForm(), true);
+        $listed = array_column($form['actions'][0]['values'], 'instanceID');
+
+        $this->assertNotContains($device, $listed, 'A device without a cloud must not be listed');
+    }
+
+    /**
+     * Module Store review: the match between a discovered appliance and an existing
+     * instance must only consider instances at the own cloud. An appliance shared by two
+     * accounts has the same HaID in both - the row must not point to the other account's
+     * instance, but offer to create one at the own cloud.
+     */
+    public function testDiscoveryMatchesOnlyOwnInstances()
+    {
+        $ownCloud = IPS_GetInstance($this->configuratorID)['ConnectionID'];
+        $foreignCloud = IPS_CreateInstance(self::CLOUD_GUID);
+
+        //Both HaIDs are part of the discovery (tests/homeappliances/response.json).
+        $ownDevice = $this->createDevice($ownCloud, 'SIEMENS-TI9575X1DE-68A40E251CAD');
+        $foreignDevice = $this->createDevice($foreignCloud, 'BOSCH-KGN36HI32-68A40E01D5C6');
+
+        IPS\InstanceManager::setStatus($ownCloud, IS_ACTIVE);
+        $form = json_decode(IPS\InstanceManager::getInstanceInterface($this->configuratorID)->GetConfigurationForm(), true);
+        $rows = array_column($form['actions'][0]['values'], 'instanceID', 'HaID');
+
+        $this->assertSame($ownDevice, $rows['SIEMENS-TI9575X1DE-68A40E251CAD'] ?? null, 'The discovered appliance is matched to the own instance');
+        $this->assertSame(0, $rows['BOSCH-KGN36HI32-68A40E01D5C6'] ?? null, 'The instance of another cloud must not be matched');
+        $this->assertNotContains($foreignDevice, array_values($rows), 'The instance of another cloud must not be listed');
+    }
+
     private function createDevice(int $cloudID, string $haID): int
     {
         $device = IPS_CreateInstance(self::DEVICE_GUID);

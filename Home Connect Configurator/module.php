@@ -113,13 +113,33 @@ class HomeConnectConfigurator extends IPSModule
 
     private function getInstanceIDForGuid($haid, $guid)
     {
-        $instanceIDs = IPS_GetInstanceListByModuleID($guid);
-        foreach ($instanceIDs as $instanceID) {
+        foreach ($this->getOwnInstanceIDs($guid) as $instanceID) {
             if (IPS_GetProperty($instanceID, 'HaID') == $haid) {
                 return $instanceID;
             }
         }
         return 0;
+    }
+
+    /**
+     * Instances of the given module that are connected to the cloud instance of this
+     * configurator. A second cloud instance belongs to another Home Connect account: its
+     * devices must neither be matched to a discovered appliance (an appliance shared by
+     * both accounts has the same HaID) nor be listed - the rows can be deleted from here.
+     */
+    private function getOwnInstanceIDs($guid)
+    {
+        $cloudID = IPS_GetInstance($this->InstanceID)['ConnectionID'];
+        if ($cloudID === 0) {
+            return [];
+        }
+        $instanceIDs = [];
+        foreach (IPS_GetInstanceListByModuleID($guid) as $instanceID) {
+            if (IPS_GetInstance($instanceID)['ConnectionID'] === $cloudID) {
+                $instanceIDs[] = $instanceID;
+            }
+        }
+        return $instanceIDs;
     }
 
     /**
@@ -132,15 +152,8 @@ class HomeConnectConfigurator extends IPSModule
     private function getExistingDeviceRows(array $knownHaIDs)
     {
         $rows = [];
-        $cloudID = IPS_GetInstance($this->InstanceID)['ConnectionID'];
         foreach (self::MODULE_TYPES as $guid) {
-            foreach (IPS_GetInstanceListByModuleID($guid) as $instanceID) {
-                // Only devices of this cloud (or of none) - the rows can be deleted from
-                // here, and a second cloud instance belongs to another account.
-                $deviceCloudID = IPS_GetInstance($instanceID)['ConnectionID'];
-                if ($deviceCloudID !== $cloudID && $deviceCloudID !== 0) {
-                    continue;
-                }
+            foreach ($this->getOwnInstanceIDs($guid) as $instanceID) {
                 $haID = (string) @IPS_GetProperty($instanceID, 'HaID');
                 if ($haID === '' || isset($knownHaIDs[$haID])) {
                     continue;

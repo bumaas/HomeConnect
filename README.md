@@ -1,8 +1,8 @@
 # Home Connect
 
 [![IP-Symcon is awesome!](https://img.shields.io/badge/IP--Symcon-6.0-blue.svg)](https://www.symcon.de)
-[![Check Style](https://github.com/symcon/Aktivliste/workflows/Check%20Style/badge.svg)](https://github.com/symcon/HomeConnect/actions)
-[![Run Tests](https://github.com/symcon/Aktivliste/workflows/Run%20Tests/badge.svg)](https://github.com/symcon/HomeConnect/actions)
+[![Check Style](https://github.com/symcon/HomeConnect/actions/workflows/style.yml/badge.svg)](https://github.com/symcon/HomeConnect/actions)
+[![Run Tests](https://github.com/symcon/HomeConnect/actions/workflows/tests.yml/badge.svg)](https://github.com/symcon/HomeConnect/actions)
 
 
 Folgende Module beinhaltet das Home Connect Repository:
